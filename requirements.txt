@@ -4,3 +4,10 @@ sqlalchemy
 mysqlclient
 pydantic
 python-dotenv
+passlib
+python-jose
+starlette
+cryptography
+bcrypt
+jose
+

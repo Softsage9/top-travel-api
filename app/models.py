@@ -1,21 +1,26 @@
-from sqlalchemy import Column, Integer, String, Date, ForeignKey, Text, DECIMAL, TIMESTAMP
+from sqlalchemy import Boolean, Column, DateTime, Integer, String, Date, ForeignKey, Text, DECIMAL, TIMESTAMP, func
 from sqlalchemy.orm import relationship
 from .database import Base
 
 class User(Base):
     __tablename__ = 'users'
     UserID = Column(Integer, primary_key=True, autoincrement=True)
+    google_id = Column(String(255), unique=True, index=True, nullable=True)
     FirstName = Column(String(50))
     LastName = Column(String(50))
+    username = Column(String(50), unique=True)
     Email = Column(String(100), unique=True)
     Password = Column(String(255))
     Phone = Column(String(20))
     DateOfBirth = Column(Date)
-    CreatedDate = Column(TIMESTAMP, server_default='CURRENT_TIMESTAMP')
-    UpdatedDate = Column(TIMESTAMP, server_default='CURRENT_TIMESTAMP', onupdate='CURRENT_TIMESTAMP')
+    CreatedDate = Column(TIMESTAMP, server_default=func.now())
+    UpdatedDate = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
     bookings = relationship('Booking', back_populates='user')
     reviews = relationship('Review', back_populates='user')
     roles = relationship('UserRole', back_populates='user')
+    disabled = Column(Boolean, default=False)
+    is_verified = Column(Boolean, default=False)
+    account_activation = relationship("AccountActivation", uselist=False, back_populates="user")
 
 class Role(Base):
     __tablename__ = 'roles'
@@ -31,6 +36,35 @@ class UserRole(Base):
     user = relationship('User', back_populates='roles')
     role = relationship('Role', back_populates='users')
 
+class SessionToken(Base):
+    __tablename__ = 'session_tokens'
+
+    token = Column(String(255), primary_key=True)
+    session_token = Column(String(255))
+    user_id = Column(Integer, ForeignKey('users.UserID'), nullable=True)
+    expiry_date = Column(DateTime)
+
+
+class PasswordReset(Base):
+    __tablename__ = 'password_resets'
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey('users.UserID'))
+    reset_token = Column(String(255), unique=True)
+    expiry_date = Column(DateTime)
+    is_used = Column(Boolean, default=False)
+    created_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
+
+class AccountActivation(Base):
+    __tablename__ = 'account_activations'
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey('users.UserID'), unique=True)
+    activation_token = Column(String(255), unique=True, index=True)
+    expiry_date = Column(DateTime)
+    created_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
+
+    user = relationship("User", back_populates="account_activation")
 class Destination(Base):
     __tablename__ = 'destinations'
     DestinationID = Column(Integer, primary_key=True, autoincrement=True)
