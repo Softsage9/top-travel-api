@@ -40,6 +40,8 @@ def get_db():
     finally:
         db.close()
 
+# Get Users Crud
+
 def get_user(db: Session, username: str):
     return db.query(models.User).filter(models.User.username == username).first()
 
@@ -55,6 +57,8 @@ def get_all_users(
 def get_user_by_id(db: Session, user_id: int):
     return db.query(models.User).filter(models.User.id == user_id).first()
 
+async def get_user_email(db: Session, email: str):
+    return db.query(models.User).filter(models.User.Email == email).first()
 
 def delete_user(db: Session, user_id: int):
     user = get_user_by_id(db, user_id)
@@ -63,7 +67,6 @@ def delete_user(db: Session, user_id: int):
     db.delete(user)
     db.commit()
     return user
-
 
 def get_user_by_google_id(db: Session, google_id: str):
     return db.query(models.User).filter(models.User.google_id == google_id).first()
@@ -100,6 +103,10 @@ async def get_current_active_user(current_user: schemas.UserInDB = Depends(get_c
         raise HTTPException(status_code=400, detail="Inactive user")
 
     return current_user
+
+# End Of Get Users Crud
+
+# Authentication Crud
 
 def get_password_hash(password):
     return pwd_context.hash(password)
@@ -153,6 +160,10 @@ def create_google_session_token(db: Session, user_id: int, google_access_token: 
 
     return session_token
 
+# End Of Authentication Crud
+
+# Create User Crud
+
 async def create_user(db: Session, user: schemas.UserCreate):
     db_user = models.User(
         username=user.username,
@@ -169,6 +180,8 @@ async def create_user(db: Session, user: schemas.UserCreate):
     db.refresh(db_user)
 
     return db_user
+
+# End Of Create User Crud
 
 def generate_six_digit_code():
     return str(random.randint(100000, 999999))
@@ -212,7 +225,9 @@ def delete_session_token(db: Session, token: str):
 
 # Send Email Verification
 
-# Send Email Verification
+# End Of Send Email Verification
+
+# Reset Password Crud
 
 def create_reset_password_token(email: str):
     data = {"sub": email, "exp": datetime.now(timezone.utc) + timedelta(minutes=10)}
@@ -254,11 +269,6 @@ async def delete_reset_password_token(db: Session, token: str):
         print(f"An error occurred: {str(e)}")
         return False
 
-
-async def get_user_email(db: Session, email: str):
-    return db.query(models.User).filter(models.User.Email == email).first()
-
-
 async def insert_password_reset_token(user_id: int, reset_token: str, expiry_date: datetime, db: Session):
     password_reset_token = models.PasswordReset(
         user_id=user_id,
@@ -279,7 +289,220 @@ def decode_reset_password_token(token: str):
         return email
     except JWTError:
         return None
+    
+# End Of Reset Password Crud
 
 # send reset password email
 
-# send reset password email
+# End of send reset password email
+
+# Destination Cruds
+
+def get_destination(db: Session, destination_id: int):
+    return db.query(models.Destination).filter(models.Destination.DestinationID == destination_id).first()
+
+def get_destinations(db: Session, skip: int = 0, limit: int = 10):
+    return db.query(models.Destination).offset(skip).limit(limit).all()
+
+def create_destination(db: Session, destination: schemas.DestinationCreate):
+    db_destination = models.Destination(
+        DestinationName=destination.DestinationName,
+        Country=destination.Country,
+        Description=destination.Description
+    )
+    db.add(db_destination)
+    db.commit()
+    db.refresh(db_destination)
+    return db_destination
+
+def update_destination(db: Session, destination_id: int, destination: schemas.DestinationCreate):
+    db_destination = get_destination(db, destination_id)
+    if db_destination is None:
+        return None
+    db_destination.DestinationName = destination.DestinationName
+    db_destination.Country = destination.Country
+    db_destination.Description = destination.Description
+    db.commit()
+    db.refresh(db_destination)
+    return db_destination
+
+def delete_destination(db: Session, destination_id: int):
+    db_destination = get_destination(db, destination_id)
+    if db_destination is None:
+        return None
+    db.delete(db_destination)
+    db.commit()
+    return db_destination
+
+# Package Cruds
+
+def get_package(db: Session, package_id: int):
+    return db.query(models.Package).filter(models.Package.PackageID == package_id).first()
+
+def get_packages(db: Session, skip: int = 0, limit: int = 10):
+    return db.query(models.Package).offset(skip).limit(limit).all()
+
+def create_package(db: Session, package: schemas.PackageCreate):
+    db_package = models.Package(
+        PackageName=package.PackageName,
+        Description=package.Description,
+        Price=package.Price,
+        Duration=package.Duration,
+        StartDate=package.StartDate,
+        EndDate=package.EndDate,
+        DestinationID=package.DestinationID
+    )
+    db.add(db_package)
+    db.commit()
+    db.refresh(db_package)
+    return db_package
+
+def update_package(db: Session, package_id: int, package: schemas.PackageCreate):
+    db_package = get_package(db, package_id)
+    if db_package is None:
+        return None
+    db_package.PackageName = package.PackageName
+    db_package.Description = package.Description
+    db_package.Price = package.Price
+    db_package.Duration = package.Duration
+    db_package.StartDate = package.StartDate
+    db_package.EndDate = package.EndDate
+    db_package.DestinationID = package.DestinationID
+    db.commit()
+    db.refresh(db_package)
+    return db_package
+
+def delete_package(db: Session, package_id: int):
+    db_package = get_package(db, package_id)
+    if db_package is None:
+        return None
+    db.delete(db_package)
+    db.commit()
+    return db_package
+
+# End Of Package
+
+# Bookings Cruds
+
+def get_booking(db: Session, booking_id: int):
+    return db.query(models.Booking).filter(models.Booking.BookingID == booking_id).first()
+
+def get_bookings(db: Session, skip: int = 0, limit: int = 10):
+    return db.query(models.Booking).offset(skip).limit(limit).all()
+
+def get_bookings_by_status(db: Session, status: models.BookingStatus, skip: int = 0, limit: int = 10):
+    return db.query(
+        models.Booking,
+        models.User.Email,
+        models.User.FirstName,
+        models.User.LastName
+    ).join(
+        models.User, models.Booking.UserID == models.User.UserID
+    ).filter(
+        models.Booking.Status == status
+    ).offset(skip).limit(limit).all()
+
+def create_booking(db: Session, booking: schemas.BookingCreate):
+    db_booking = models.Booking(
+        UserID=booking.UserID,
+        PackageID=booking.PackageID,
+        Status=booking.Status,
+        NumberOfPeople=booking.NumberOfPeople
+    )
+    db.add(db_booking)
+    db.commit()
+    db.refresh(db_booking)
+
+    # Fetch user details
+    user = db.query(models.User).filter(models.User.UserID == booking.UserID).first()
+
+    return {
+        "BookingID": db_booking.BookingID,
+        "UserID": db_booking.UserID,
+        "PackageID": db_booking.PackageID,
+        "BookingDate": db_booking.BookingDate,
+        "Status": db_booking.Status,
+        "NumberOfPeople": db_booking.NumberOfPeople,
+        "UserEmail": user.Email,
+        "UserFirstName": user.FirstName,
+        "UserLastName": user.LastName
+    }
+
+
+def update_booking(db: Session, booking_id: int, booking: schemas.BookingCreate):
+    db_booking = get_booking(db, booking_id)
+    if db_booking is None:
+        return None
+    db_booking.UserID = booking.UserID
+    db_booking.PackageID = booking.PackageID
+    db_booking.Status = booking.Status
+    db_booking.NumberOfPeople = booking.NumberOfPeople
+    db.commit()
+    db.refresh(db_booking)
+    return db_booking
+
+def update_booking_status(db: Session, booking_id: int, status: models.BookingStatus):
+    db_booking = get_booking(db, booking_id)
+    if db_booking:
+        db_booking.Status = status
+        db.commit()
+        db.refresh(db_booking)
+        return db_booking
+    return None
+
+def delete_booking(db: Session, booking_id: int):
+    db_booking = get_booking(db, booking_id)
+    if db_booking is None:
+        return None
+    db.delete(db_booking)
+    db.commit()
+    return db_booking
+
+# End Of Bookings
+
+# Review Crud
+
+def get_review(db: Session, review_id: int):
+    return db.query(models.Review).filter(models.Review.ReviewID == review_id).first()
+
+def get_reviews(db: Session, skip: int = 0, limit: int = 10):
+    return db.query(models.Review).offset(skip).limit(limit).all()
+
+def get_reviews_by_package(db: Session, package_id: int, skip: int = 0, limit: int = 10):
+    reviews = db.query(models.Review).filter(models.Review.PackageID == package_id).offset(skip).limit(limit).all()
+    avg_rating = db.query(func.avg(models.Review.Rating)).filter(models.Review.PackageID == package_id).scalar()
+    return avg_rating, reviews
+
+def create_review(db: Session, review: schemas.ReviewCreate):
+    db_review = models.Review(
+        UserID=review.UserID,
+        PackageID=review.PackageID,
+        Rating=review.Rating,
+        Comment=review.Comment
+    )
+    db.add(db_review)
+    db.commit()
+    db.refresh(db_review)
+    return db_review
+
+def update_review(db: Session, review_id: int, review: schemas.ReviewCreate):
+    db_review = get_review(db, review_id)
+    if db_review is None:
+        return None
+    db_review.UserID = review.UserID
+    db_review.PackageID = review.PackageID
+    db_review.Rating = review.Rating
+    db_review.Comment = review.Comment
+    db.commit()
+    db.refresh(db_review)
+    return db_review
+
+def delete_review(db: Session, review_id: int):
+    db_review = get_review(db, review_id)
+    if db_review is None:
+        return None
+    db.delete(db_review)
+    db.commit()
+    return db_review
+
+# End Of Review 

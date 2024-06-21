@@ -2,6 +2,8 @@ from pydantic import BaseModel, EmailStr, Field
 from typing import List, Optional
 from datetime import date, datetime
 
+from app.models import BookingStatus
+
 class UserBase(BaseModel):
     FirstName: str
     LastName: str
@@ -85,18 +87,22 @@ class PackageInDB(PackageBase):
 class BookingBase(BaseModel):
     UserID: int
     PackageID: int
-    Status: str
+    Status: BookingStatus
     NumberOfPeople: int
 
 class BookingCreate(BookingBase):
     pass
 
-class BookingInDB(BookingBase):
+class BookingInDB(BaseModel):
     BookingID: int
     BookingDate: datetime
+    UserEmail: Optional[str]
+    UserFirstName: Optional[str]
+    UserLastName: Optional[str]
 
     class Config:
         orm_mode = True
+
 
 class ReviewBase(BaseModel):
     UserID: int
@@ -113,6 +119,10 @@ class ReviewInDB(ReviewBase):
 
     class Config:
         orm_mode = True
+
+class PackageReviews(BaseModel):
+    average_rating: float
+    reviews: List[ReviewInDB]
 
 class PaymentBase(BaseModel):
     BookingID: int

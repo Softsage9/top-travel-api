@@ -1,4 +1,5 @@
-from sqlalchemy import Boolean, Column, DateTime, Integer, String, Date, ForeignKey, Text, DECIMAL, TIMESTAMP, func
+from enum import Enum
+from sqlalchemy import Boolean, Column, DateTime, Integer, String, Date, ForeignKey, Text, DECIMAL, TIMESTAMP, func, Enum as SQLAEnum
 from sqlalchemy.orm import relationship
 from .database import Base
 
@@ -87,18 +88,21 @@ class Package(Base):
     bookings = relationship('Booking', back_populates='package')
     reviews = relationship('Review', back_populates='package')
 
+class BookingStatus(str, Enum):
+    PENDING = "pending"
+    CONFIRMED = "confirmed"
+    CANCELLED = "cancelled"
 class Booking(Base):
     __tablename__ = 'bookings'
     BookingID = Column(Integer, primary_key=True, autoincrement=True)
     UserID = Column(Integer, ForeignKey('users.UserID'))
     PackageID = Column(Integer, ForeignKey('packages.PackageID'))
-    BookingDate = Column(TIMESTAMP, server_default='CURRENT_TIMESTAMP')
-    Status = Column(String(50))
+    BookingDate = Column(TIMESTAMP, server_default=func.now())
+    Status = Column(SQLAEnum(BookingStatus), default=BookingStatus.PENDING)
     NumberOfPeople = Column(Integer)
     user = relationship('User', back_populates='bookings')
     package = relationship('Package', back_populates='bookings')
     payment = relationship('Payment', back_populates='booking', uselist=False)
-
 class Review(Base):
     __tablename__ = 'reviews'
     ReviewID = Column(Integer, primary_key=True, autoincrement=True)
@@ -106,7 +110,7 @@ class Review(Base):
     PackageID = Column(Integer, ForeignKey('packages.PackageID'))
     Rating = Column(Integer)
     Comment = Column(Text)
-    ReviewDate = Column(TIMESTAMP, server_default='CURRENT_TIMESTAMP')
+    ReviewDate = Column(TIMESTAMP, server_default=func.now())
     user = relationship('User', back_populates='reviews')
     package = relationship('Package', back_populates='reviews')
 
@@ -114,7 +118,7 @@ class Payment(Base):
     __tablename__ = 'payments'
     PaymentID = Column(Integer, primary_key=True, autoincrement=True)
     BookingID = Column(Integer, ForeignKey('bookings.BookingID'))
-    PaymentDate = Column(TIMESTAMP, server_default='CURRENT_TIMESTAMP')
+    PaymentDate = Column(TIMESTAMP, server_default=func.now())
     Amount = Column(DECIMAL(10, 2))
     PaymentMethod = Column(String(50))
     Status = Column(String(50))
