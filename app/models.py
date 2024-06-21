@@ -14,8 +14,8 @@ class User(Base):
     Password = Column(String(255))
     Phone = Column(String(20))
     DateOfBirth = Column(Date)
-    CreatedDate = Column(TIMESTAMP, server_default=func.now())
-    UpdatedDate = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
+    CreatedDate = Column(DateTime, server_default=func.now())
+    UpdatedDate = Column(DateTime, server_default=func.now(), onupdate=func.now())
     bookings = relationship('Booking', back_populates='user')
     reviews = relationship('Review', back_populates='user')
     roles = relationship('UserRole', back_populates='user')
@@ -58,13 +58,11 @@ class PasswordReset(Base):
 
 class AccountActivation(Base):
     __tablename__ = 'account_activations'
-
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey('users.UserID'), unique=True)
     activation_token = Column(String(255), unique=True, index=True)
     expiry_date = Column(DateTime)
-    created_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
-
+    created_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
     user = relationship("User", back_populates="account_activation")
 class Destination(Base):
     __tablename__ = 'destinations'
