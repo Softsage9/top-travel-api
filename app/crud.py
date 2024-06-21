@@ -1,27 +1,30 @@
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import joinedload
 import logging
 import random
 import smtplib
-import ssl
 from datetime import datetime, timedelta, timezone
 import os
 from dotenv import load_dotenv
 import uuid
-from typing import Optional
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email_validator import validate_email, EmailNotValidError
+import asyncio
 
-from fastapi import BackgroundTasks, Depends, HTTPException
+from fastapi import Depends, HTTPException
 from jose import JWTError, jwt
 from passlib.context import CryptContext
-from sqlalchemy import func, update
-from sqlalchemy.orm import Session
+from sqlalchemy import func, select
 from starlette import status
 
 from . import models, schemas
 
 from fastapi.security import OAuth2PasswordBearer
-
-from .database import SessionLocal
+from app import database
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
@@ -33,47 +36,46 @@ load_dotenv()
 SECRET_KEY = os.getenv("SECRET_KEY")
 ALGORITHM = os.getenv("ALGORITHM", "HS256")
 
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
 # Get Users Crud
 
-def get_user(db: Session, username: str):
-    return db.query(models.User).filter(models.User.username == username).first()
+async def get_user(db: AsyncSession, username: str):
+    result = await db.execute(select(models.User).where(models.User.username == username))
+    return result.scalars().first()
 
-def get_all_users(
-        db: Session,
+
+async def get_all_users(
+        db: AsyncSession,
         skip: int = 0,
         limit: int = 100,
 ):
-    query = db.query(models.User)
-    return query.offset(skip).limit(limit).all()
+    result = await db.execute(select(models.User).offset(skip).limit(limit))
+    users = result.scalars().all()
+    return users
 
 
-def get_user_by_id(db: Session, user_id: int):
-    return db.query(models.User).filter(models.User.id == user_id).first()
+async def get_user_by_id(db: AsyncSession, user_id: int):
+    result = await db.execute(select(models.User).where(models.User.UserID == user_id))
+    return result.scalars().first()
 
-async def get_user_email(db: Session, email: str):
-    return db.query(models.User).filter(models.User.Email == email).first()
+async def get_user_email(db: AsyncSession, email: str):
+    result =  db.execute(select(models.User).filter(models.User.Email == email))
+    return result.scalars().first()
 
-def delete_user(db: Session, user_id: int):
-    user = get_user_by_id(db, user_id)
+async def delete_user(db: AsyncSession, user_id: int):
+    user = await get_user_by_id(db, user_id)
     if user is None:
         return None
-    db.delete(user)
-    db.commit()
+    await db.delete(user)
+    await db.commit()
     return user
 
-def get_user_by_google_id(db: Session, google_id: str):
-    return db.query(models.User).filter(models.User.google_id == google_id).first()
+async def get_user_by_google_id(db: AsyncSession, google_id: str):
+    result = await db.execute(select(models.User).filter(models.User.google_id == google_id))
+    return result.scalars().first()
 
 async def get_current_user(
         token: str = Depends(oauth2_scheme),
-        db: Session = Depends(get_db)
+        db: AsyncSession = Depends(database.get_db)
 ):
     credential_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -82,18 +84,18 @@ async def get_current_user(
     )
 
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])  # Decoding JWT
+        payload = jwt.decode(token, database.SECRET_KEY, algorithms=[database.ALGORITHM])  # Decoding JWT
         username = payload.get("sub")  # Get user ID from 'sub'
 
         if username is None:
             raise credential_exception
 
         token_data = schemas.TokenData(username=username)
-    except jwt.JWTError:
+    except JWTError:
         raise credential_exception
 
-    user = get_user(db, username=token_data.username)
-    if user in None:
+    user = await get_user(db, username=token_data.username)
+    if user is None:
         raise credential_exception
 
     return user
@@ -115,8 +117,8 @@ def verify_password(plain_password, password_hash):
     return pwd_context.verify(plain_password, password_hash)
 
 
-async def authenticate_user(db: Session, username: str, password: str):
-    user = db.query(models.User).filter(models.User.username == username).first()
+async def authenticate_user(db: AsyncSession, username: str, password: str):
+    user = await get_user(db, username)
     if not user:
         logging.error(f"User {username} not found")
         return None
@@ -125,7 +127,7 @@ async def authenticate_user(db: Session, username: str, password: str):
         return None
     return user
 
-def create_access_token(data: dict, db: Session, user_id: int, expires_delta: timedelta or None = None):
+async def create_access_token(data: dict, db: AsyncSession, user_id: int, expires_delta: timedelta or None = None):
     token = str(uuid.uuid4())
     expiry_date = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=15))
     to_encode = data.copy()
@@ -139,12 +141,12 @@ def create_access_token(data: dict, db: Session, user_id: int, expires_delta: ti
     )
 
     db.add(session_token)
-    db.commit()  
-    db.refresh(session_token)  
+    await db.commit()  
+    await db.refresh(session_token)  
 
     return encoded_jwt, session_token
 
-def create_google_session_token(db: Session, user_id: int, google_access_token: str,
+async def create_google_session_token(db: AsyncSession, user_id: int, google_access_token: str,
                                 expires_delta: timedelta or None = None):
     expiry_date = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=15))
 
@@ -155,8 +157,8 @@ def create_google_session_token(db: Session, user_id: int, google_access_token: 
     )
 
     db.add(session_token)  
-    db.commit() 
-    db.refresh(session_token)  
+    await db.commit() 
+    await db.refresh(session_token)  
 
     return session_token
 
@@ -164,20 +166,22 @@ def create_google_session_token(db: Session, user_id: int, google_access_token: 
 
 # Create User Crud
 
-async def create_user(db: Session, user: schemas.UserCreate):
+async def create_user(db: AsyncSession, user: schemas.UserCreate):
     db_user = models.User(
         username=user.username,
         Email=user.Email,
-        Password=get_password_hash(user.Password), 
+        Password=get_password_hash(user.Password),
         FirstName=user.FirstName,
         LastName=user.LastName,
         Phone=user.Phone,
         DateOfBirth=user.DateOfBirth,
+        is_verified=False,
+        disabled=False,  
     )
 
     db.add(db_user)
-    db.commit()
-    db.refresh(db_user)
+    await db.commit()
+    await db.refresh(db_user)
 
     return db_user
 
@@ -187,7 +191,7 @@ def generate_six_digit_code():
     return str(random.randint(100000, 999999))
 
 
-def create_session_token(db: Session, user_id: int):
+async def create_session_token(db: AsyncSession, user_id: int):
     activation_code = generate_six_digit_code()
 
     expiry_date = datetime.now(timezone.utc) + timedelta(days=1)
@@ -199,32 +203,75 @@ def create_session_token(db: Session, user_id: int):
     )
 
     db.add(account_activation)
-    db.commit()
-    db.refresh(account_activation)
+    await db.commit()
+    await db.refresh(account_activation)
 
     return account_activation
 
 
-def get_session_token(db: Session, token: str):
+async def get_session_token(db: AsyncSession, token: str):
     logging.info(f"Fetching session token: {token}")
-    result = db.query(models.SessionToken).filter(models.SessionToken.token == token).first()
+    result = await db.execute(select(models.SessionToken).filter(models.SessionToken.token == token))
     logging.info(f"Query result for token {token}: {result}")
-    return result
+    return result.scalars().first()
 
-
-def delete_session_token(db: Session, token: str):
+async def delete_session_token(db: AsyncSession, token: str):
     logging.info(f"Deleting session token: {token}")
-    session_token = db.query(models.SessionToken).filter(models.SessionToken.token == token).first()
+    
+    result = await db.execute(select(models.SessionToken).where(models.SessionToken.token == token))
+    session_token = result.scalars().first()
+    
     if session_token:
-        db.delete(session_token)
-        db.commit()
+        await db.delete(session_token)
+        await db.commit()
         logging.info(f"Deleted session token: {token}")
         return True
+    
     logging.error(f"Session token {token} not found for deletion")
     return False
 
 # Send Email Verification
 
+async def send_verification_email(email_sender, email_password, email_receiver, code):
+    smtp_server = "smtp.gmail.com"
+    smtp_port = 465
+
+    message = MIMEMultipart()
+    message["From"] = email_sender
+    message["To"] = email_receiver
+    message["Subject"] = "Verify Your Email Address - Top Travel"
+    body = f"""
+    Dear Customer,
+
+    Welcome to Top Travel! Thank you for choosing us for your travel needs. Please use the following verification code to activate your account:
+
+    Verification Code: {code}
+
+    This code will expire in 24 hours.
+
+    If you did not request this, please ignore this email.
+
+    Best regards,
+    The Top Travel Team
+    """
+    message.attach(MIMEText(body, 'plain'))
+
+    def send_email():
+        try:
+            smtp_obj = smtplib.SMTP_SSL(smtp_server, smtp_port)
+            smtp_obj.login(email_sender, email_password)
+            smtp_obj.send_message(message)
+            smtp_obj.quit()
+            print('Email sent successfully.')
+        except Exception as e:
+            print(f"Failed to send verification email: {e}")
+
+    try:
+        validate_email(email_receiver)  # Validate email format
+        await asyncio.to_thread(send_email)  # Run blocking function in a separate thread
+    except EmailNotValidError as e:
+        print(f"Invalid email address: {e}")
+        
 # End Of Send Email Verification
 
 # Reset Password Crud
@@ -234,18 +281,19 @@ def create_reset_password_token(email: str):
     token = jwt.encode(data, SECRET_KEY, ALGORITHM)
     return token
 
-
-async def update_user_password(password: str, user_id: int, token: str, db: Session):
+async def update_user_password(password: str, user_id: int, token: str, db: AsyncSession):
     try:
-        user = db.query(models.User).filter(models.User.id == user_id).first()
+        result = await db.execute(select(models.User).filter(models.User.UserID == user_id))
+        user = result.scalars().first()
         if user:
             user.Password = password
-            db.commit()
+            await db.commit()
 
-            user_token = db.query(models.PasswordReset).filter(models.PasswordReset.reset_token == token).first()
+            result_token = await db.execute(select(models.PasswordReset).filter(models.PasswordReset.reset_token == token))
+            user_token = result_token.scalars().first()
             if user_token:
                 user_token.is_used = True
-                db.commit()
+                await db.commit()
 
             return True
         else:
@@ -256,28 +304,29 @@ async def update_user_password(password: str, user_id: int, token: str, db: Sess
         raise
 
 
-async def delete_reset_password_token(db: Session, token: str):
+async def delete_reset_password_token(db: AsyncSession, token: str):
     try:
-        session_token = db.query(models.PasswordReset).filter(models.PasswordReset.reset_token == token).first()
+        result_token = await db.execute(select(models.PasswordReset).filter(models.PasswordReset.reset_token == token))
+        session_token = result_token.scalars().first()
         if session_token:
-            db.delete(session_token)
-            db.commit()
+            await db.delete(session_token)
+            await db.commit()
             return True
         return False
-    except Exception as e:
-        db.rollback()
+    except SQLAlchemyError as e:
+        await db.rollback()
         print(f"An error occurred: {str(e)}")
         return False
 
-async def insert_password_reset_token(user_id: int, reset_token: str, expiry_date: datetime, db: Session):
+async def insert_password_reset_token(user_id: int, reset_token: str, expiry_date: datetime, db: AsyncSession):
     password_reset_token = models.PasswordReset(
         user_id=user_id,
         reset_token=reset_token,
         expiry_date=expiry_date,
     )
     db.add(password_reset_token)
-    db.commit()
-    db.refresh(password_reset_token)
+    await db.commit()
+    await db.refresh(password_reset_token)
     return password_reset_token
 
 
@@ -298,51 +347,55 @@ def decode_reset_password_token(token: str):
 
 # Destination Cruds
 
-def get_destination(db: Session, destination_id: int):
-    return db.query(models.Destination).filter(models.Destination.DestinationID == destination_id).first()
+async def get_destination(db: AsyncSession, destination_id: int):
+    result = await db.execute(select(models.Destination).filter(models.Destination.DestinationID == destination_id))
+    return result.scalars().first()
 
-def get_destinations(db: Session, skip: int = 0, limit: int = 10):
-    return db.query(models.Destination).offset(skip).limit(limit).all()
+async def get_destinations(db: AsyncSession, skip: int = 0, limit: int = 10):
+    result = await db.execute(select(models.Destination).offset(skip).limit(limit))
+    return result.scalars().all()
 
-def create_destination(db: Session, destination: schemas.DestinationCreate):
+async def create_destination(db: AsyncSession, destination: schemas.DestinationCreate):
     db_destination = models.Destination(
         DestinationName=destination.DestinationName,
         Country=destination.Country,
         Description=destination.Description
     )
     db.add(db_destination)
-    db.commit()
-    db.refresh(db_destination)
+    await db.commit()
+    await db.refresh(db_destination)
     return db_destination
 
-def update_destination(db: Session, destination_id: int, destination: schemas.DestinationCreate):
-    db_destination = get_destination(db, destination_id)
+async def update_destination(db: AsyncSession, destination_id: int, destination: schemas.DestinationCreate):
+    db_destination = await get_destination(db, destination_id)
     if db_destination is None:
         return None
     db_destination.DestinationName = destination.DestinationName
     db_destination.Country = destination.Country
     db_destination.Description = destination.Description
-    db.commit()
-    db.refresh(db_destination)
+    await db.commit()
+    await db.refresh(db_destination)
     return db_destination
 
-def delete_destination(db: Session, destination_id: int):
-    db_destination = get_destination(db, destination_id)
+async def delete_destination(db: AsyncSession, destination_id: int):
+    db_destination = await get_destination(db, destination_id)
     if db_destination is None:
         return None
-    db.delete(db_destination)
-    db.commit()
+    await db.delete(db_destination)
+    await db.commit()
     return db_destination
 
 # Package Cruds
 
-def get_package(db: Session, package_id: int):
-    return db.query(models.Package).filter(models.Package.PackageID == package_id).first()
+async def get_package(db: AsyncSession, package_id: int):
+    result = await db.execute(select(models.Package).filter(models.Package.PackageID == package_id))
+    return result.scalars().first()
 
-def get_packages(db: Session, skip: int = 0, limit: int = 10):
-    return db.query(models.Package).offset(skip).limit(limit).all()
+async def get_packages(db: AsyncSession, skip: int = 0, limit: int = 10):
+    result = await db.execute(select(models.Package).offset(skip).limit(limit))
+    return result.scalars().all()
 
-def create_package(db: Session, package: schemas.PackageCreate):
+async def create_package(db: AsyncSession, package: schemas.PackageCreate):
     db_package = models.Package(
         PackageName=package.PackageName,
         Description=package.Description,
@@ -353,12 +406,12 @@ def create_package(db: Session, package: schemas.PackageCreate):
         DestinationID=package.DestinationID
     )
     db.add(db_package)
-    db.commit()
-    db.refresh(db_package)
+    await db.commit()
+    await db.refresh(db_package)
     return db_package
 
-def update_package(db: Session, package_id: int, package: schemas.PackageCreate):
-    db_package = get_package(db, package_id)
+async def update_package(db: AsyncSession, package_id: int, package: schemas.PackageCreate):
+    db_package = await get_package(db, package_id)
     if db_package is None:
         return None
     db_package.PackageName = package.PackageName
@@ -368,41 +421,59 @@ def update_package(db: Session, package_id: int, package: schemas.PackageCreate)
     db_package.StartDate = package.StartDate
     db_package.EndDate = package.EndDate
     db_package.DestinationID = package.DestinationID
-    db.commit()
-    db.refresh(db_package)
+    await db.commit()
+    await db.refresh(db_package)
     return db_package
 
-def delete_package(db: Session, package_id: int):
-    db_package = get_package(db, package_id)
+async def delete_package(db: AsyncSession, package_id: int):
+    db_package = await get_package(db, package_id)
     if db_package is None:
         return None
-    db.delete(db_package)
-    db.commit()
+    await db.delete(db_package)
+    await db.commit()
     return db_package
 
 # End Of Package
 
 # Bookings Cruds
 
-def get_booking(db: Session, booking_id: int):
-    return db.query(models.Booking).filter(models.Booking.BookingID == booking_id).first()
+async def get_booking(db: AsyncSession, booking_id: int):
+    result = await db.execute(select(models.Booking).filter(models.Booking.BookingID == booking_id))
+    return result.scalars().first()
 
-def get_bookings(db: Session, skip: int = 0, limit: int = 10):
-    return db.query(models.Booking).offset(skip).limit(limit).all()
+async def get_bookings(db: AsyncSession, skip: int = 0, limit: int = 10):
+    result = await db.execute(select(models.Booking).offset(skip).limit(limit))
+    return result.scalars().all()
 
-def get_bookings_by_status(db: Session, status: models.BookingStatus, skip: int = 0, limit: int = 10):
-    return db.query(
-        models.Booking,
-        models.User.Email,
-        models.User.FirstName,
-        models.User.LastName
-    ).join(
-        models.User, models.Booking.UserID == models.User.UserID
-    ).filter(
-        models.Booking.Status == status
-    ).offset(skip).limit(limit).all()
+async def get_bookings_by_status(db: AsyncSession, status: models.BookingStatus, skip: int = 0, limit: int = 10):
+    result = await db.execute(
+        select(models.Booking)
+        .options(joinedload(models.Booking.user))
+        .filter(models.Booking.Status == status)
+        .offset(skip)
+        .limit(limit)
+    )
+    bookings = result.scalars().all()
+    
+    # Extract and include user details
+    bookings_with_user_info = [
+        {
+            "BookingID": booking.BookingID,
+            "UserID": booking.UserID,
+            "PackageID": booking.PackageID,
+            "BookingDate": booking.BookingDate,
+            "Status": booking.Status,
+            "NumberOfPeople": booking.NumberOfPeople,
+            "UserEmail": booking.user.Email,
+            "UserFirstName": booking.user.FirstName,
+            "UserLastName": booking.user.LastName
+        }
+        for booking in bookings
+    ]
+    
+    return bookings_with_user_info
 
-def create_booking(db: Session, booking: schemas.BookingCreate):
+async def create_booking(db: AsyncSession, booking: schemas.BookingCreate):
     db_booking = models.Booking(
         UserID=booking.UserID,
         PackageID=booking.PackageID,
@@ -410,11 +481,12 @@ def create_booking(db: Session, booking: schemas.BookingCreate):
         NumberOfPeople=booking.NumberOfPeople
     )
     db.add(db_booking)
-    db.commit()
-    db.refresh(db_booking)
+    await db.commit()
+    await db.refresh(db_booking)
 
     # Fetch user details
-    user = db.query(models.User).filter(models.User.UserID == booking.UserID).first()
+    result = await db.execute(select(models.User).filter(models.User.UserID == booking.UserID))
+    user = result.scalars().first()
 
     return {
         "BookingID": db_booking.BookingID,
@@ -429,51 +501,80 @@ def create_booking(db: Session, booking: schemas.BookingCreate):
     }
 
 
-def update_booking(db: Session, booking_id: int, booking: schemas.BookingCreate):
-    db_booking = get_booking(db, booking_id)
+async def update_booking(db: AsyncSession, booking_id: int, booking: schemas.BookingCreate):
+    db_booking = await get_booking(db, booking_id)
     if db_booking is None:
         return None
     db_booking.UserID = booking.UserID
     db_booking.PackageID = booking.PackageID
     db_booking.Status = booking.Status
     db_booking.NumberOfPeople = booking.NumberOfPeople
-    db.commit()
-    db.refresh(db_booking)
+    await db.commit()
+    await db.refresh(db_booking)
     return db_booking
 
-def update_booking_status(db: Session, booking_id: int, status: models.BookingStatus):
-    db_booking = get_booking(db, booking_id)
+async def update_booking_status(db: AsyncSession, booking_id: int, status: models.BookingStatus):
+    db_booking = await get_booking(db, booking_id)
     if db_booking:
         db_booking.Status = status
-        db.commit()
-        db.refresh(db_booking)
+        await db.commit()
+        await db.refresh(db_booking)
         return db_booking
     return None
 
-def delete_booking(db: Session, booking_id: int):
-    db_booking = get_booking(db, booking_id)
+async def delete_booking(db: AsyncSession, booking_id: int):
+    db_booking = await get_booking(db, booking_id)
     if db_booking is None:
         return None
-    db.delete(db_booking)
-    db.commit()
+    await db.delete(db_booking)
+    await db.commit()
     return db_booking
 
 # End Of Bookings
 
 # Review Crud
 
-def get_review(db: Session, review_id: int):
-    return db.query(models.Review).filter(models.Review.ReviewID == review_id).first()
+async def get_review(db: AsyncSession, review_id: int):
+    result = await db.execute(select(models.Review).filter(models.Review.ReviewID == review_id))
+    return result.scalars().first()
 
-def get_reviews(db: Session, skip: int = 0, limit: int = 10):
-    return db.query(models.Review).offset(skip).limit(limit).all()
+async def get_reviews(db: AsyncSession, skip: int = 0, limit: int = 10):
+    result = await db.execute(select(models.Review).offset(skip).limit(limit))
+    return result.scalars().all()
 
-def get_reviews_by_package(db: Session, package_id: int, skip: int = 0, limit: int = 10):
-    reviews = db.query(models.Review).filter(models.Review.PackageID == package_id).offset(skip).limit(limit).all()
-    avg_rating = db.query(func.avg(models.Review.Rating)).filter(models.Review.PackageID == package_id).scalar()
-    return avg_rating, reviews
+async def get_reviews_by_package(db: AsyncSession, package_id: int, skip: int = 0, limit: int = 10):
+    result = await db.execute(
+        select(models.Review)
+        .filter(models.Review.PackageID == package_id)
+        .offset(skip)
+        .limit(limit)
+    )
+    reviews = result.scalars().all()
+    avg_rating = await db.execute(
+        select(func.avg(models.Review.Rating))
+        .filter(models.Review.PackageID == package_id)
+    )
+    avg_rating = avg_rating.scalar()
+    
+    if avg_rating is None:
+        avg_rating = 0.0
 
-def create_review(db: Session, review: schemas.ReviewCreate):
+    reviews_in_db = [
+        schemas.ReviewInDB(
+            ReviewID=review.ReviewID,
+            UserID=review.UserID,
+            PackageID=review.PackageID,
+            Rating=review.Rating,
+            Comment=review.Comment,
+            ReviewDate=review.ReviewDate
+        )
+        for review in reviews
+    ]
+    
+    return avg_rating, reviews_in_db
+
+
+async def create_review(db: AsyncSession, review: schemas.ReviewCreate):
     db_review = models.Review(
         UserID=review.UserID,
         PackageID=review.PackageID,
@@ -481,28 +582,28 @@ def create_review(db: Session, review: schemas.ReviewCreate):
         Comment=review.Comment
     )
     db.add(db_review)
-    db.commit()
-    db.refresh(db_review)
+    await db.commit()
+    await db.refresh(db_review)
     return db_review
 
-def update_review(db: Session, review_id: int, review: schemas.ReviewCreate):
-    db_review = get_review(db, review_id)
+async def update_review(db: AsyncSession, review_id: int, review: schemas.ReviewCreate):
+    db_review = await get_review(db, review_id)
     if db_review is None:
         return None
     db_review.UserID = review.UserID
     db_review.PackageID = review.PackageID
     db_review.Rating = review.Rating
     db_review.Comment = review.Comment
-    db.commit()
-    db.refresh(db_review)
+    await db.commit()
+    await db.refresh(db_review)
     return db_review
 
-def delete_review(db: Session, review_id: int):
-    db_review = get_review(db, review_id)
+async def delete_review(db: AsyncSession, review_id: int):
+    db_review = await get_review(db, review_id)
     if db_review is None:
         return None
-    db.delete(db_review)
-    db.commit()
+    await db.delete(db_review)
+    await db.commit()
     return db_review
 
 # End Of Review 

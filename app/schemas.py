@@ -23,6 +23,8 @@ class UserInDB(UserBase):
     UserID: int
     CreatedDate: datetime
     UpdatedDate: datetime
+    disabled: bool = False
+    is_verified: bool = False
 
     class Config:
         orm_mode = True

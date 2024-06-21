@@ -1,7 +1,6 @@
 fastapi
 uvicorn
 sqlalchemy
-mysqlclient
 pydantic
 python-dotenv
 passlib
@@ -10,4 +9,6 @@ starlette
 cryptography
 bcrypt
 jose
-
+databases 
+asyncpg
+aiomysql
