@@ -304,7 +304,6 @@ async def read_bookings(skip: int = 0, limit: int = 10, db: AsyncSession = Depen
     
     results = []
     for booking in bookings:
-        # Fetch the user associated with the booking
         user_result = await db.execute(
             select(models.User).filter(models.User.UserID == booking.UserID)
         )
