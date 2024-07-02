@@ -1,5 +1,5 @@
 from enum import Enum
-from sqlalchemy import Boolean, Column, DateTime, Integer, String, Date, ForeignKey, Text, DECIMAL, TIMESTAMP, func, Enum as SQLAEnum
+from sqlalchemy import Boolean, Column, DateTime, Integer, LargeBinary, String, Date, ForeignKey, Text, DECIMAL, TIMESTAMP, func, Enum as SQLAEnum
 from sqlalchemy.orm import relationship
 from .database import Base
 
@@ -72,31 +72,44 @@ class Destination(Base):
     Description = Column(Text)
     packages = relationship('Package', back_populates='destination')
 
+
+class Attachment(Base):
+    __tablename__ = 'attachments'
+    
+    AttachmentID = Column(Integer, primary_key=True, index=True)
+    PackageID = Column(Integer, ForeignKey('packages.PackageID'))
+    title = Column(String(255))
+    src = Column(String(255))
+    rawFile = Column(LargeBinary)
+    
+    package = relationship("Package", back_populates="Attachments")
+
 class Package(Base):
     __tablename__ = 'packages'
     PackageID = Column(Integer, primary_key=True, autoincrement=True)
     PackageName = Column(String(100))
-    Description = Column(Text)
+    Description = Column(Text, nullable=True)
     Price = Column(DECIMAL(10, 2))
     Duration = Column(Integer)
     StartDate = Column(Date)
     EndDate = Column(Date)
     DestinationID = Column(Integer, ForeignKey('destinations.DestinationID'))
+    
+    Attachments = relationship("Attachment", back_populates="package", lazy="selectin")
     destination = relationship('Destination', back_populates='packages')
     bookings = relationship('Booking', back_populates='package')
     reviews = relationship('Review', back_populates='package')
-
 class BookingStatus(str, Enum):
-    PENDING = "pending"
-    CONFIRMED = "confirmed"
-    CANCELLED = "cancelled"
+    CONFIRMED = "CONFIRMED"
+    PENDING = "PENDING"
+    CANCELLED = "CANCELLED"
 class Booking(Base):
     __tablename__ = 'bookings'
     BookingID = Column(Integer, primary_key=True, autoincrement=True)
     UserID = Column(Integer, ForeignKey('users.UserID'))
     PackageID = Column(Integer, ForeignKey('packages.PackageID'))
     BookingDate = Column(TIMESTAMP, server_default=func.now())
-    Status = Column(SQLAEnum(BookingStatus), default=BookingStatus.PENDING)
+    Status = Column(SQLAEnum(BookingStatus), default=BookingStatus.PENDING, nullable=False)
     NumberOfPeople = Column(Integer)
     user = relationship('User', back_populates='bookings')
     package = relationship('Package', back_populates='bookings')

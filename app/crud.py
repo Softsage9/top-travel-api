@@ -1,8 +1,13 @@
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from pathlib import Path
+from shutil import copyfileobj
+import shutil
+from typing import List
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import selectinload
 import logging
 import random
 import smtplib
@@ -14,14 +19,14 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email_validator import validate_email, EmailNotValidError
 import asyncio
-
-from fastapi import Depends, HTTPException
+import requests
+from fastapi import Depends, HTTPException, UploadFile
 from jose import JWTError, jwt
 from passlib.context import CryptContext
-from sqlalchemy import func, select
+from sqlalchemy import asc, desc, func, select
 from starlette import status
 
-from . import models, schemas
+from . import models, schemas, config
 
 from fastapi.security import OAuth2PasswordBearer
 from app import database
@@ -29,7 +34,6 @@ from app import database
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 oauth2_admin_scheme = OAuth2PasswordBearer(tokenUrl="admin-login")
-
 
 load_dotenv()
 
@@ -45,20 +49,35 @@ async def get_user(db: AsyncSession, username: str):
 
 async def get_all_users(
         db: AsyncSession,
-        skip: int = 0,
-        limit: int = 100,
+        page: int = 0,
+        limit: int = 10,
+        sort: str = "UserID",  # Default sort field
+        order: str = "asc",  # Default order
 ):
-    result = await db.execute(select(models.User).offset(skip).limit(limit))
-    users = result.scalars().all()
-    return users
-
+    try:
+        sort_field = getattr(models.User, sort)
+        order_by = asc(sort_field) if order == "asc" else desc(sort_field)
+        
+        result = await db.execute(
+            select(models.User)
+            .order_by(order_by)
+            .offset(page * limit)
+            .limit(limit)
+        )
+        
+        users = result.scalars().all()
+        return users
+    except AttributeError:
+        raise ValueError(f"Invalid sort field: {sort}")
+    except Exception as e:
+        raise RuntimeError(f"Error querying the database: {e}")
 
 async def get_user_by_id(db: AsyncSession, user_id: int):
     result = await db.execute(select(models.User).where(models.User.UserID == user_id))
     return result.scalars().first()
 
 async def get_user_email(db: AsyncSession, email: str):
-    result =  db.execute(select(models.User).filter(models.User.Email == email))
+    result = await db.execute(select(models.User).filter(models.User.Email == email))
     return result.scalars().first()
 
 async def delete_user(db: AsyncSession, user_id: int):
@@ -162,21 +181,32 @@ async def create_google_session_token(db: AsyncSession, user_id: int, google_acc
 
     return session_token
 
+async def verify_google_token(token: str):
+    url = f"https://oauth2.googleapis.com/tokeninfo?id_token={token}"
+    response = requests.get(url)
+    user_info = response.json()
+
+    if response.status_code != 200 or user_info.get("aud") != os.getenv("GOOGLE_CLIENT_ID"):
+        raise HTTPException(status_code=401, detail="Invalid Google token")
+
+    return user_info
+
 # End Of Authentication Crud
 
 # Create User Crud
 
-async def create_user(db: AsyncSession, user: schemas.UserCreate):
+async def create_user(db: AsyncSession, user: schemas.UserCreate, is_google_login: bool = False):
     db_user = models.User(
         username=user.username,
         Email=user.Email,
-        Password=get_password_hash(user.Password),
+         Password=get_password_hash(user.Password) if not is_google_login else "",
         FirstName=user.FirstName,
         LastName=user.LastName,
         Phone=user.Phone,
         DateOfBirth=user.DateOfBirth,
-        is_verified=False,
-        disabled=False,  
+        google_id=user.google_id,
+        is_verified=is_google_login, 
+        disabled=False,
     )
 
     db.add(db_user)
@@ -271,6 +301,46 @@ async def send_verification_email(email_sender, email_password, email_receiver, 
         await asyncio.to_thread(send_email)  # Run blocking function in a separate thread
     except EmailNotValidError as e:
         print(f"Invalid email address: {e}")
+
+async def send_reset_password_email(email_sender, email_password, email_receiver, reset_code):
+    smtp_server = "smtp.gmail.com"
+    smtp_port = 465
+
+    message = MIMEMultipart()
+    message["From"] = email_sender
+    message["To"] = email_receiver
+    message["Subject"] = "Reset Your Password - Top Travel"
+    body = f"""
+    Dear Customer,
+
+    We received a request to reset your password for your Top Travel account. Please use the following reset code to change your password:
+
+    Reset Code: {reset_code}
+
+    This code will expire in 24 hours.
+
+    If you did not request this, please ignore this email.
+
+    Best regards,
+    The Top Travel Team
+    """
+    message.attach(MIMEText(body, 'plain'))
+
+    def send_email():
+        try:
+            smtp_obj = smtplib.SMTP_SSL(smtp_server, smtp_port)
+            smtp_obj.login(email_sender, email_password)
+            smtp_obj.send_message(message)
+            smtp_obj.quit()
+            print('Reset password email sent successfully.')
+        except Exception as e:
+            print(f"Failed to send reset password email: {e}")
+
+    try:
+        validate_email(email_receiver)  
+        await asyncio.to_thread(send_email)  
+    except EmailNotValidError as e:
+        print(f"Invalid email address: {e}")      
         
 # End Of Send Email Verification
 
@@ -341,10 +411,6 @@ def decode_reset_password_token(token: str):
     
 # End Of Reset Password Crud
 
-# send reset password email
-
-# End of send reset password email
-
 # Destination Cruds
 
 async def get_destination(db: AsyncSession, destination_id: int):
@@ -353,7 +419,9 @@ async def get_destination(db: AsyncSession, destination_id: int):
 
 async def get_destinations(db: AsyncSession, skip: int = 0, limit: int = 10):
     result = await db.execute(select(models.Destination).offset(skip).limit(limit))
-    return result.scalars().all()
+    destinations = result.scalars().all()
+    total = await db.scalar(select(func.count()).select_from(models.Destination))
+    return destinations, total
 
 async def create_destination(db: AsyncSession, destination: schemas.DestinationCreate):
     db_destination = models.Destination(
@@ -392,10 +460,17 @@ async def get_package(db: AsyncSession, package_id: int):
     return result.scalars().first()
 
 async def get_packages(db: AsyncSession, skip: int = 0, limit: int = 10):
-    result = await db.execute(select(models.Package).offset(skip).limit(limit))
-    return result.scalars().all()
+    result = await db.execute(
+        select(models.Package)
+        .options(selectinload(models.Package.Attachments))
+        .offset(skip)
+        .limit(limit)
+    )
+    packages = result.scalars().all()
+    total = await db.scalar(select(func.count()).select_from(models.Package))
+    return packages, total
 
-async def create_package(db: AsyncSession, package: schemas.PackageCreate):
+async def create_package(db: AsyncSession, package: schemas.PackageCreate, attachments: List[UploadFile]):
     db_package = models.Package(
         PackageName=package.PackageName,
         Description=package.Description,
@@ -408,7 +483,33 @@ async def create_package(db: AsyncSession, package: schemas.PackageCreate):
     db.add(db_package)
     await db.commit()
     await db.refresh(db_package)
+
+    for attachment in attachments:
+        if attachment:
+            filename = f"{uuid.uuid4()}{Path(attachment.filename).suffix}"
+            file_path = config.IMAGEDIR / filename
+
+            with open(file_path, "wb") as buffer:
+                shutil.copyfileobj(attachment.file, buffer)
+
+            # Read the file content to store in rawFile
+            with open(file_path, "rb") as buffer:
+                file_content = buffer.read()
+
+            image_url = f"static/images/{filename}"
+
+            db_attachment = models.Attachment(
+                PackageID=db_package.PackageID,
+                title=attachment.filename,
+                src=image_url,
+                rawFile=file_content
+            )
+            db.add(db_attachment)
+    
+    await db.commit()
+    await db.refresh(db_package)
     return db_package
+
 
 async def update_package(db: AsyncSession, package_id: int, package: schemas.PackageCreate):
     db_package = await get_package(db, package_id)
@@ -426,24 +527,28 @@ async def update_package(db: AsyncSession, package_id: int, package: schemas.Pac
     return db_package
 
 async def delete_package(db: AsyncSession, package_id: int):
-    db_package = await get_package(db, package_id)
-    if db_package is None:
+    result = await db.execute(select(models.Package).filter(models.Package.PackageID == package_id))
+    package = result.scalars().first()
+    if package is None:
         return None
-    await db.delete(db_package)
+    await db.delete(package)
     await db.commit()
-    return db_package
+    return package
 
 # End Of Package
 
 # Bookings Cruds
 
-async def get_booking(db: AsyncSession, booking_id: int):
-    result = await db.execute(select(models.Booking).filter(models.Booking.BookingID == booking_id))
-    return result.scalars().first()
-
 async def get_bookings(db: AsyncSession, skip: int = 0, limit: int = 10):
     result = await db.execute(select(models.Booking).offset(skip).limit(limit))
-    return result.scalars().all()
+    bookings = result.scalars().all()
+    total = await db.scalar(select(func.count()).select_from(models.Booking))
+    return bookings, total
+
+async def get_booking(db: AsyncSession, booking_id: int):
+    result = await db.execute(select(models.Booking).filter(models.Booking.BookingID == booking_id))
+    booking = result.scalars().first()
+    return booking
 
 async def get_bookings_by_status(db: AsyncSession, status: models.BookingStatus, skip: int = 0, limit: int = 10):
     result = await db.execute(
@@ -523,12 +628,23 @@ async def update_booking_status(db: AsyncSession, booking_id: int, status: model
     return None
 
 async def delete_booking(db: AsyncSession, booking_id: int):
-    db_booking = await get_booking(db, booking_id)
-    if db_booking is None:
+    booking = await get_booking(db, booking_id)
+    if booking is None: 
         return None
-    await db.delete(db_booking)
+    user = await get_user_by_id(db, booking.UserID)
+    await db.delete(booking)
     await db.commit()
-    return db_booking
+    return {
+        "BookingID": booking.BookingID,
+        "UserID": booking.UserID,
+        "PackageID": booking.PackageID,
+        "BookingDate": booking.BookingDate,
+        "Status": booking.Status,
+        "NumberOfPeople": booking.NumberOfPeople,
+        "UserEmail": user.Email,
+        "UserFirstName": user.FirstName,
+        "UserLastName": user.LastName
+    }
 
 # End Of Bookings
 

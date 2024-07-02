@@ -1,7 +1,9 @@
+from enum import Enum
 from pydantic import BaseModel, EmailStr, Field
 from typing import List, Optional
 from datetime import date, datetime
 
+from app import models
 from app.models import BookingStatus
 
 class UserBase(BaseModel):
@@ -15,6 +17,7 @@ class UserBase(BaseModel):
 class UserCreate(UserBase):
     Password: str
     Role: Optional[str] = "user"
+    google_id: Optional[str] = None
 
 class UserUpdate(UserBase):
     pass
@@ -68,34 +71,49 @@ class DestinationInDB(DestinationBase):
     class Config:
         orm_mode = True
 
+class AttachmentBase(BaseModel):
+    title: str
+    src: str
+    rawFile: Optional[bytes] = None
+class AttachmentCreate(AttachmentBase):
+    pass
+class Attachment(AttachmentBase):
+    AttachmentID: int
+    PackageID: int
+
+    class Config:
+        orm_mode = True
+        
 class PackageBase(BaseModel):
     PackageName: str
-    Description: str
+    Description: Optional[str] = None
     Price: float
     Duration: int
     StartDate: date
     EndDate: date
     DestinationID: int
-
 class PackageCreate(PackageBase):
-    pass
-
+     Attachments: List[AttachmentCreate] = []
 class PackageInDB(PackageBase):
     PackageID: int
-
+    Attachments: List[Attachment] = []
     class Config:
         orm_mode = True
+class BookingStatus(str, Enum):
+    CONFIRMED = "CONFIRMED"
+    PENDING = "PENDING"
+    CANCELLED = "CANCELLED"
 
 class BookingBase(BaseModel):
     UserID: int
     PackageID: int
-    Status: BookingStatus
+    Status: BookingStatus = BookingStatus.PENDING
     NumberOfPeople: int
 
 class BookingCreate(BookingBase):
     pass
 
-class BookingInDB(BaseModel):
+class BookingInDB(BookingBase):
     BookingID: int
     BookingDate: datetime
     UserEmail: Optional[str]
@@ -104,7 +122,6 @@ class BookingInDB(BaseModel):
 
     class Config:
         orm_mode = True
-
 
 class ReviewBase(BaseModel):
     UserID: int
@@ -228,3 +245,4 @@ class ResetForgetPassword(BaseModel):
     secret_token: str
     new_password: str
     confirm_password: str
+
