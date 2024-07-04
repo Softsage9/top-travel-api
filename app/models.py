@@ -70,20 +70,10 @@ class Destination(Base):
     DestinationName = Column(String(100))
     Country = Column(String(50))
     Description = Column(Text)
+    src = Column(String, nullable=True)
+    title = Column(String, nullable=True)
+    rawFile = Column(LargeBinary, nullable=True)
     packages = relationship('Package', back_populates='destination')
-
-
-class Attachment(Base):
-    __tablename__ = 'attachments'
-    
-    AttachmentID = Column(Integer, primary_key=True, index=True)
-    PackageID = Column(Integer, ForeignKey('packages.PackageID'))
-    title = Column(String(255))
-    src = Column(String(255))
-    rawFile = Column(LargeBinary)
-    
-    package = relationship("Package", back_populates="Attachments")
-
 class Package(Base):
     __tablename__ = 'packages'
     PackageID = Column(Integer, primary_key=True, autoincrement=True)
@@ -94,8 +84,6 @@ class Package(Base):
     StartDate = Column(Date)
     EndDate = Column(Date)
     DestinationID = Column(Integer, ForeignKey('destinations.DestinationID'))
-    
-    Attachments = relationship("Attachment", back_populates="package", lazy="selectin")
     destination = relationship('Destination', back_populates='packages')
     bookings = relationship('Booking', back_populates='package')
     reviews = relationship('Review', back_populates='package')
