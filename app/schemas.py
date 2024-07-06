@@ -57,11 +57,15 @@ class UserRoleInDB(UserRoleBase):
     class Config:
         orm_mode = True
 
+class ImageBase(BaseModel):
+    rawFile: Optional[bytes] = Field(None, description="Raw binary data of the image file")
+    src: Optional[str] = Field(None, description="Source URL of the image")
+    title: Optional[str] = Field(None, description="Title of the image")
 class DestinationBase(BaseModel):
     DestinationName: str
     Country: str
     Description: Optional[str] = None
-
+    image: ImageBase = Field(..., description="Image data associated with the package")
 class DestinationCreate(DestinationBase):
     pass
 
@@ -71,34 +75,30 @@ class DestinationInDB(DestinationBase):
     class Config:
         orm_mode = True
 
-class AttachmentBase(BaseModel):
-    title: str
-    src: str
-    rawFile: Optional[bytes] = None
-class AttachmentCreate(AttachmentBase):
-    pass
-class Attachment(AttachmentBase):
-    AttachmentID: int
-    PackageID: int
-
-    class Config:
-        orm_mode = True
-        
 class PackageBase(BaseModel):
-    PackageName: str
-    Description: Optional[str] = None
-    Price: float
-    Duration: int
-    StartDate: date
-    EndDate: date
-    DestinationID: int
+    PackageName: str = Field(..., description="Name of the package")
+    Description: Optional[str] = Field(None, description="Description of the package")
+    Price: float = Field(..., description="Price of the package")
+    Duration: int = Field(..., description="Duration of the package in days")
+    StartDate: date = Field(..., description="Start date of the package")
+    EndDate: date = Field(..., description="End date of the package")
+    DestinationID: int = Field(..., description="Identifier of the destination related to the package")
+
 class PackageCreate(PackageBase):
-     Attachments: List[AttachmentCreate] = []
+    pass
+
+class PackageUpdate(PackageBase):
+    pass
 class PackageInDB(PackageBase):
-    PackageID: int
-    Attachments: List[Attachment] = []
+    PackageID: int = Field(None, description="Unique identifier of the package, automatically generated")
     class Config:
         orm_mode = True
+        from_attributes = True
+class BookingsDeleteRequest(BaseModel):
+    booking_ids: List[int]
+class BookingsDeleteResponse(BaseModel):
+    message: str
+    BookingIDs: List[int]
 class BookingStatus(str, Enum):
     CONFIRMED = "CONFIRMED"
     PENDING = "PENDING"
@@ -121,8 +121,7 @@ class BookingInDB(BookingBase):
     UserLastName: Optional[str]
 
     class Config:
-        orm_mode = True
-
+        orm_mode = True        
 class ReviewBase(BaseModel):
     UserID: int
     PackageID: int
@@ -245,4 +244,7 @@ class ResetForgetPassword(BaseModel):
     secret_token: str
     new_password: str
     confirm_password: str
+
+class DeleteManyRequest(BaseModel):
+    ids: List[int] = Field(...)
 

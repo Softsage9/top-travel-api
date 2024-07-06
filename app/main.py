@@ -6,7 +6,7 @@ import shutil
 from typing import List, Optional
 import uuid
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Response, UploadFile
+from fastapi import Body, Depends, FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile, logger
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,6 +24,7 @@ app.mount("/static", StaticFiles(directory="app/static"), name="static")
 origins = [
     "http://localhost:5173", 
     "http://localhost:5174",
+    "http://localhost:3000",
 ]
 
 app.add_middleware(
@@ -39,7 +40,8 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
 load_dotenv()
 
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 async def init_models():
     async with database.engine.begin() as conn:
@@ -287,8 +289,47 @@ async def verify_code(request: schemas.VerifyCodeRequest, db: AsyncSession = Dep
 # Destination Endpoints
 
 @app.post("/destinations/", response_model=schemas.DestinationInDB)
-async def create_destination(destination: schemas.DestinationCreate, db: AsyncSession = Depends(database.get_db)):
-    return await crud.create_destination(db, destination)
+async def create_destination(
+        DestinationName: str = Form(...),
+        Country: str = Form(...),
+        Description: Optional[str] = Form(None),
+        image: UploadFile = File(None),
+        db: AsyncSession = Depends(database.get_db)
+):
+    logger.info("Received request to create a destination")
+    
+    if image:
+        filename = f"{uuid.uuid4()}{Path(image.filename).suffix}"
+        file_path = config.IMAGEDIR / filename
+
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(image.file, buffer)
+        
+        title = DestinationName
+        src = str(file_path)
+    else:
+        title = None
+        src = None
+    
+    image_data = schemas.ImageBase(
+        title=title,
+        src=src,
+    )
+
+    destination_data = schemas.DestinationCreate(
+        DestinationName=DestinationName,
+        Country=Country,
+        Description=Description,
+        image=image_data
+    )
+
+    created_destination = await crud.create_destination(db, destination_data)
+    
+    if not created_destination:
+        raise HTTPException(status_code=500, detail="Failed to create the destination")
+    
+    logger.info("Package created successfully")
+    return created_destination
 
 @app.get("/destinations/", response_model=List[schemas.DestinationInDB])
 async def read_destinations(response: Response, skip: int = 0, limit: int = 10, db: AsyncSession = Depends(database.get_db)):
@@ -305,24 +346,17 @@ async def read_destination(destination_id: int, db: AsyncSession = Depends(datab
 
 @app.put("/destinations/{destination_id}", response_model=schemas.DestinationInDB)
 async def update_destination(destination_id: int, destination: schemas.DestinationCreate, db: AsyncSession = Depends(database.get_db)):
-    db_destination = await crud.update_destination(db, destination_id, destination)
-    if db_destination is None:
+    updated_destination = await crud.update_destination(db, destination_id, destination)
+    if updated_destination is None:
         raise HTTPException(status_code=404, detail="Destination not found")
-    return db_destination
+    return updated_destination
 
-@app.delete("/destinations/", response_model=List[schemas.DestinationInDB])
-async def delete_destinations(destination_ids: List[int], db: AsyncSession = Depends(database.get_db)):
-    destinations = []
-    for destination_id in destination_ids:
-        destination = await db.execute(select(models.Destination).filter(models.Destination.DestinationID == destination_id))
-        destination = destination.scalars().first()
-        if destination:
-            await db.delete(destination)
-            await db.commit()
-            destinations.append(destination)
-        else:
-            raise HTTPException(status_code=404, detail=f"Destination with ID {destination_id} not found")
-    return destinations
+@app.delete("/destinations/", response_model=List[int])
+async def delete_many_destinations(delete_request: schemas.DeleteManyRequest, db: AsyncSession = Depends(database.get_db)):
+    deleted_ids = await crud.delete_many_destinations(db, delete_request.ids)
+    if not deleted_ids:
+        raise HTTPException(status_code=404, detail="No destinations found with these IDs")
+    return deleted_ids
 
 @app.delete("/destinations/{destination_id}", response_model=schemas.DestinationInDB)
 async def delete_destination(destination_id: int, db: AsyncSession = Depends(database.get_db)):
@@ -344,28 +378,10 @@ async def create_package(
         StartDate: date = Form(...),
         EndDate: date = Form(...),
         DestinationID: int = Form(...),
-        attachments: List[UploadFile] = File(None),
         db: AsyncSession = Depends(database.get_db)
 ):
-    if attachments is None:
-        attachments = []
+    logger.info("Received request to create a package")
     
-    attachments_data = []
-    for attachment in attachments:
-        filename = f"{uuid.uuid4()}{Path(attachment.filename).suffix}"
-        file_path = Path("static/images") / filename
-        with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(attachment.file, buffer)
-        
-        with open(file_path, "rb") as buffer:
-            file_content = buffer.read()
-        
-        attachments_data.append(schemas.AttachmentCreate(
-            title=attachment.filename,
-            src=f"/static/images/{filename}",  # Use a relative URL for static files
-            rawFile=file_content  # Store the file bytes
-        ))
-
     package_data = schemas.PackageCreate(
         PackageName=PackageName,
         Description=Description,
@@ -373,11 +389,17 @@ async def create_package(
         Duration=Duration,
         StartDate=StartDate,
         EndDate=EndDate,
-        DestinationID=DestinationID,
-        Attachments=attachments_data
+        DestinationID=DestinationID
     )
 
-    return await crud.create_package(db=db, package=package_data, attachments=attachments)
+    created_package = await crud.create_package(db, package_data)
+    
+    if not created_package:
+        raise HTTPException(status_code=500, detail="Failed to create the package")
+    
+    logger.info("Package created successfully")
+    return created_package
+    
 
 @app.get("/packages/", response_model=List[schemas.PackageInDB])
 async def read_packages(response: Response, skip: int = 0, limit: int = 10, db: AsyncSession = Depends(database.get_db)):
@@ -393,25 +415,34 @@ async def read_package(package_id: int, db: AsyncSession = Depends(database.get_
     return db_package
 
 @app.put("/packages/{package_id}", response_model=schemas.PackageInDB)
-async def update_package(package_id: int, package: schemas.PackageCreate, db: AsyncSession = Depends(database.get_db)):
-    db_package = await crud.update_package(db, package_id, package)
-    if db_package is None:
+async def update_package(package_id: int, package: schemas.PackageUpdate, db: AsyncSession = Depends(database.get_db)):
+    updated_package = await crud.update_package(db, package_id, package)
+    if updated_package is None:
         raise HTTPException(status_code=404, detail="Package not found")
-    return db_package
+    return schemas.PackageInDB.from_orm(updated_package)
 
 @app.delete("/packages/", response_model=List[schemas.PackageInDB])
-async def delete_packages(package_ids: List[int], db: AsyncSession = Depends(database.get_db)):
-    packages = []
+async def delete_packages(request: Request, db: AsyncSession = Depends(database.get_db)):
+    body = await request.json()
+    package_ids = body['ids']
+
+    deleted_packages = []
     for package_id in package_ids:
-        package = await db.execute(select(models.Package).filter(models.Package.PackageID == package_id))
-        package = package.scalars().first()
-        if package:
-            await db.delete(package)
-            await db.commit()
-            packages.append(package)
-        else:
+        package = await crud.delete_package(db, package_id)
+        if package is None:
             raise HTTPException(status_code=404, detail=f"Package with ID {package_id} not found")
-    return packages
+        package_data = schemas.PackageInDB(
+            PackageID=package.PackageID,
+            PackageName=package.PackageName,
+            Description=package.Description,
+            Price=package.Price,
+            Duration=package.Duration,
+            StartDate=package.StartDate,
+            EndDate=package.EndDate,
+            DestinationID=package.DestinationID
+        )
+        deleted_packages.append(package_data)
+    return deleted_packages
 
 @app.delete("/packages/{package_id}", response_model=schemas.PackageInDB)
 async def delete_package(package_id: int, db: AsyncSession = Depends(database.get_db)):
@@ -534,27 +565,12 @@ async def update_booking_status(booking_id: int, status: models.BookingStatus, d
         UserFirstName=user.FirstName,
         UserLastName=user.LastName
     )
-
-@app.delete("/bookings/", response_model=List[schemas.BookingInDB])
-async def delete_bookings(booking_ids: List[int], db: AsyncSession = Depends(database.get_db)):
-    bookings = []
-    for booking_id in booking_ids:
-        booking = await db.execute(select(models.Booking).filter(models.Booking.BookingID == booking_id))
-        booking = booking.scalars().first()
-        if booking:
-            await db.delete(booking)
-            await db.commit()
-            bookings.append(booking)
-        else:
-            raise HTTPException(status_code=404, detail=f"Booking with ID {booking_id} not found")
-    return bookings
-
-@app.delete("/bookings/{booking_id}", response_model=schemas.BookingInDB)
-async def delete_booking(booking_id: int, db: AsyncSession = Depends(database.get_db)):
-    db_booking = await crud.delete_booking(db, booking_id)
-    if db_booking is None:
-        raise HTTPException(status_code=404, detail="Booking not found")
-    return db_booking
+@app.delete("/bookings/", response_model=List[int])
+async def delete_many_bookings(delete_request: schemas.DeleteManyRequest, db: AsyncSession = Depends(database.get_db)):
+    deleted_ids = await crud.delete_many_bookings(db, delete_request.ids)
+    if not deleted_ids:
+        raise HTTPException(status_code=404, detail="No bookings found with these IDs")
+    return deleted_ids
 
 # End Of Booking Endpoints
 

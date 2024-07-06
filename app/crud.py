@@ -3,7 +3,7 @@ from email.mime.text import MIMEText
 from pathlib import Path
 from shutil import copyfileobj
 import shutil
-from typing import List
+from typing import Any, Dict, List
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import joinedload
@@ -23,7 +23,7 @@ import requests
 from fastapi import Depends, HTTPException, UploadFile
 from jose import JWTError, jwt
 from passlib.context import CryptContext
-from sqlalchemy import asc, desc, func, select
+from sqlalchemy import asc, delete, desc, func, select
 from starlette import status
 
 from . import models, schemas, config
@@ -73,8 +73,11 @@ async def get_all_users(
         raise RuntimeError(f"Error querying the database: {e}")
 
 async def get_user_by_id(db: AsyncSession, user_id: int):
-    result = await db.execute(select(models.User).where(models.User.UserID == user_id))
-    return result.scalars().first()
+    logging.info(f"Fetching user with ID: {user_id}")
+    result = await db.execute(select(models.User).filter(models.User.UserID == user_id))
+    user = result.scalars().first()
+    logging.info(f"Retrieved user: {user}")
+    return user
 
 async def get_user_email(db: AsyncSession, email: str):
     result = await db.execute(select(models.User).filter(models.User.Email == email))
@@ -415,63 +418,124 @@ def decode_reset_password_token(token: str):
 
 async def get_destination(db: AsyncSession, destination_id: int):
     result = await db.execute(select(models.Destination).filter(models.Destination.DestinationID == destination_id))
-    return result.scalars().first()
+    destination = result.scalars().first()
+    if not destination:
+        raise HTTPException(status_code=404, detail=f"Destination with ID {destination_id} not found")
+    
+    response_destination = schemas.DestinationInDB(
+        DestinationID=destination.DestinationID,
+        DestinationName=destination.DestinationName,
+        Country=destination.Country,
+        Description=destination.Description,
+        image=schemas.ImageBase(
+                title=destination.title,
+                src=destination.src,
+                rawFile=None 
+            ) if destination.title and destination.src else None
+    )
+    
+    return response_destination
 
 async def get_destinations(db: AsyncSession, skip: int = 0, limit: int = 10):
     result = await db.execute(select(models.Destination).offset(skip).limit(limit))
     destinations = result.scalars().all()
     total = await db.scalar(select(func.count()).select_from(models.Destination))
-    return destinations, total
+
+    response_destinations = [
+        schemas.DestinationInDB(
+            DestinationID=destination.DestinationID,
+            DestinationName=destination.DestinationName,
+            Country=destination.Country,
+            Description=destination.Description,
+            image=schemas.ImageBase(
+                title=destination.title,
+                src=destination.src,
+                rawFile=None 
+            )
+        )
+        for destination in destinations
+    ]
+
+    return response_destinations, total
 
 async def create_destination(db: AsyncSession, destination: schemas.DestinationCreate):
-    db_destination = models.Destination(
-        DestinationName=destination.DestinationName,
-        Country=destination.Country,
-        Description=destination.Description
-    )
-    db.add(db_destination)
+    try:
+        db_destination = models.Destination(
+            DestinationName=destination.DestinationName,
+            Country=destination.Country,
+            Description=destination.Description,
+            title=destination.image.title,
+            src=destination.image.src,
+            rawFile=None
+        )
+        db.add(db_destination)
+        
+        await db.commit()
+        await db.refresh(db_destination)
+
+        response_destination = schemas.DestinationInDB(
+            DestinationID=db_destination.DestinationID,
+            DestinationName=db_destination.DestinationName,
+            Country=db_destination.Country,
+            Description=db_destination.Description,
+            image=schemas.ImageBase(
+                title=db_destination.title,
+                src=db_destination.src,
+                rawFile=None  
+            )
+        )
+        
+        return response_destination
+    except SQLAlchemyError as e:
+        await db.rollback()  
+        raise HTTPException(status_code=400, detail=str(e))
+
+async def update_destination(db: AsyncSession, destination_id: int, destination_update: schemas.DestinationCreate):
+    result = await db.execute(select(models.Destination).filter(models.Destination.DestinationID == destination_id))
+    db_destination = result.scalars().first()
+    if db_destination is None:
+        raise HTTPException(status_code=404, detail=f"Destination with ID {destination_id} not found")
+    
+    update_data = destination_update.dict(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(db_destination, key, value)
+    
     await db.commit()
     await db.refresh(db_destination)
     return db_destination
 
-async def update_destination(db: AsyncSession, destination_id: int, destination: schemas.DestinationCreate):
-    db_destination = await get_destination(db, destination_id)
-    if db_destination is None:
-        return None
-    db_destination.DestinationName = destination.DestinationName
-    db_destination.Country = destination.Country
-    db_destination.Description = destination.Description
+async def delete_many_destinations(db: AsyncSession, ids: list[int]) -> list[int]:
+    query = select(models.Destination).where(models.Destination.DestinationID.in_(ids))
+    result = await db.execute(query)
+    destinations = result.scalars().all()
+    if not destinations:
+        raise HTTPException(status_code=404, detail="Destinations not found")
+    
+    for destination in destinations:
+        await db.delete(destination)
     await db.commit()
-    await db.refresh(db_destination)
-    return db_destination
-
-async def delete_destination(db: AsyncSession, destination_id: int):
-    db_destination = await get_destination(db, destination_id)
-    if db_destination is None:
-        return None
-    await db.delete(db_destination)
-    await db.commit()
-    return db_destination
+    
+    return ids
+    
 
 # Package Cruds
 
+async def create_package(db: AsyncSession, package: schemas.PackageCreate) -> models.Package:
+    db_package = models.Package(**package.dict())
+    db.add(db_package)
+    await db.commit()
+    await db.refresh(db_package)
+    return db_package
+
 async def get_package(db: AsyncSession, package_id: int):
     result = await db.execute(select(models.Package).filter(models.Package.PackageID == package_id))
-    return result.scalars().first()
+    package = result.scalars().first()
 
-async def get_packages(db: AsyncSession, skip: int = 0, limit: int = 10):
-    result = await db.execute(
-        select(models.Package)
-        .options(selectinload(models.Package.Attachments))
-        .offset(skip)
-        .limit(limit)
-    )
-    packages = result.scalars().all()
-    total = await db.scalar(select(func.count()).select_from(models.Package))
-    return packages, total
+    if package is None:
+        return None
 
-async def create_package(db: AsyncSession, package: schemas.PackageCreate, attachments: List[UploadFile]):
-    db_package = models.Package(
+    response_package = schemas.PackageInDB(
+        PackageID=package.PackageID,
         PackageName=package.PackageName,
         Description=package.Description,
         Price=package.Price,
@@ -480,57 +544,53 @@ async def create_package(db: AsyncSession, package: schemas.PackageCreate, attac
         EndDate=package.EndDate,
         DestinationID=package.DestinationID
     )
-    db.add(db_package)
-    await db.commit()
-    await db.refresh(db_package)
+    
+    return response_package
 
-    for attachment in attachments:
-        if attachment:
-            filename = f"{uuid.uuid4()}{Path(attachment.filename).suffix}"
-            file_path = config.IMAGEDIR / filename
+async def get_packages(db: AsyncSession, skip: int = 0, limit: int = 10):
+    result = await db.execute(
+        select(models.Package)
+        .offset(skip)
+        .limit(limit)
+    )
+    packages = result.scalars().all()
+    total = await db.scalar(select(func.count()).select_from(models.Package))
 
-            with open(file_path, "wb") as buffer:
-                shutil.copyfileobj(attachment.file, buffer)
+    response_packages = [
+        schemas.PackageInDB(
+            PackageID=package.PackageID,
+            PackageName=package.PackageName,
+            Description=package.Description,
+            Price=package.Price,
+            Duration=package.Duration,
+            StartDate=package.StartDate,
+            EndDate=package.EndDate,
+            DestinationID=package.DestinationID
+        )
+        for package in packages
+    ]
+    
+    return response_packages, total
 
-            # Read the file content to store in rawFile
-            with open(file_path, "rb") as buffer:
-                file_content = buffer.read()
-
-            image_url = f"static/images/{filename}"
-
-            db_attachment = models.Attachment(
-                PackageID=db_package.PackageID,
-                title=attachment.filename,
-                src=image_url,
-                rawFile=file_content
-            )
-            db.add(db_attachment)
+async def update_package(db: AsyncSession, package_id: int, package_update: schemas.PackageUpdate):
+    result = await db.execute(select(models.Package).filter(models.Package.PackageID == package_id))
+    db_package = result.scalars().first()
+    if db_package is None:
+        raise HTTPException(status_code=404, detail=f"Package with ID {package_id} not found")
+    
+    update_data = package_update.dict(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(db_package, key, value)
     
     await db.commit()
     await db.refresh(db_package)
     return db_package
 
-
-async def update_package(db: AsyncSession, package_id: int, package: schemas.PackageCreate):
-    db_package = await get_package(db, package_id)
-    if db_package is None:
-        return None
-    db_package.PackageName = package.PackageName
-    db_package.Description = package.Description
-    db_package.Price = package.Price
-    db_package.Duration = package.Duration
-    db_package.StartDate = package.StartDate
-    db_package.EndDate = package.EndDate
-    db_package.DestinationID = package.DestinationID
-    await db.commit()
-    await db.refresh(db_package)
-    return db_package
-
 async def delete_package(db: AsyncSession, package_id: int):
-    result = await db.execute(select(models.Package).filter(models.Package.PackageID == package_id))
+    result = await db.execute(select(models.Package).filter(models.Package.PackageID == package_id).options(selectinload(models.Package.destination)))
     package = result.scalars().first()
-    if package is None:
-        return None
+    if not package:
+        raise HTTPException(status_code=404, detail=f"Package with ID {package_id} not found")
     await db.delete(package)
     await db.commit()
     return package
@@ -605,6 +665,21 @@ async def create_booking(db: AsyncSession, booking: schemas.BookingCreate):
         "UserLastName": user.LastName
     }
 
+async def delete_many_bookings(db: AsyncSession, ids: List[int]) -> List[int]:
+    print("Fetching bookings to delete:", ids)
+    result = await db.execute(select(models.Booking).filter(models.Booking.BookingID.in_(ids)))
+    bookings_to_delete = result.scalars().all()
+    
+    if not bookings_to_delete:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bookings not found")
+
+    for booking in bookings_to_delete:
+        await db.delete(booking)
+
+    await db.commit()
+
+    return [booking.BookingID for booking in bookings_to_delete]
+
 
 async def update_booking(db: AsyncSession, booking_id: int, booking: schemas.BookingCreate):
     db_booking = await get_booking(db, booking_id)
@@ -626,25 +701,6 @@ async def update_booking_status(db: AsyncSession, booking_id: int, status: model
         await db.refresh(db_booking)
         return db_booking
     return None
-
-async def delete_booking(db: AsyncSession, booking_id: int):
-    booking = await get_booking(db, booking_id)
-    if booking is None: 
-        return None
-    user = await get_user_by_id(db, booking.UserID)
-    await db.delete(booking)
-    await db.commit()
-    return {
-        "BookingID": booking.BookingID,
-        "UserID": booking.UserID,
-        "PackageID": booking.PackageID,
-        "BookingDate": booking.BookingDate,
-        "Status": booking.Status,
-        "NumberOfPeople": booking.NumberOfPeople,
-        "UserEmail": user.Email,
-        "UserFirstName": user.FirstName,
-        "UserLastName": user.LastName
-    }
 
 # End Of Bookings
 

@@ -67,23 +67,13 @@ class AccountActivation(Base):
 class Destination(Base):
     __tablename__ = 'destinations'
     DestinationID = Column(Integer, primary_key=True, autoincrement=True)
-    DestinationName = Column(String(100))
+    DestinationName = Column(String(100), nullable=True)
     Country = Column(String(50))
     Description = Column(Text)
+    src = Column(String(1255), nullable=True)
+    title = Column(String(255), nullable=True)
+    rawFile = Column(LargeBinary, nullable=True)
     packages = relationship('Package', back_populates='destination')
-
-
-class Attachment(Base):
-    __tablename__ = 'attachments'
-    
-    AttachmentID = Column(Integer, primary_key=True, index=True)
-    PackageID = Column(Integer, ForeignKey('packages.PackageID'))
-    title = Column(String(255))
-    src = Column(String(255))
-    rawFile = Column(LargeBinary)
-    
-    package = relationship("Package", back_populates="Attachments")
-
 class Package(Base):
     __tablename__ = 'packages'
     PackageID = Column(Integer, primary_key=True, autoincrement=True)
@@ -94,15 +84,15 @@ class Package(Base):
     StartDate = Column(Date)
     EndDate = Column(Date)
     DestinationID = Column(Integer, ForeignKey('destinations.DestinationID'))
-    
-    Attachments = relationship("Attachment", back_populates="package", lazy="selectin")
     destination = relationship('Destination', back_populates='packages')
     bookings = relationship('Booking', back_populates='package')
     reviews = relationship('Review', back_populates='package')
+
 class BookingStatus(str, Enum):
     CONFIRMED = "CONFIRMED"
     PENDING = "PENDING"
     CANCELLED = "CANCELLED"
+
 class Booking(Base):
     __tablename__ = 'bookings'
     BookingID = Column(Integer, primary_key=True, autoincrement=True)
