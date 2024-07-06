@@ -6,7 +6,7 @@ import shutil
 from typing import List, Optional
 import uuid
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Response, UploadFile, logger
+from fastapi import Body, Depends, FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile, logger
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -439,10 +439,15 @@ async def update_package(package_id: int, package: schemas.PackageUpdate, db: As
     return schemas.PackageInDB.from_orm(updated_package)
 
 @app.delete("/packages/", response_model=List[schemas.PackageInDB])
-async def delete_packages(package_ids: List[int], db: AsyncSession = Depends(database.get_db)):
+async def delete_packages(request: Request, db: AsyncSession = Depends(database.get_db)):
+    body = await request.json()
+    package_ids = body['ids']
+
     deleted_packages = []
     for package_id in package_ids:
         package = await crud.delete_package(db, package_id)
+        if package is None:
+            raise HTTPException(status_code=404, detail=f"Package with ID {package_id} not found")
         package_data = schemas.PackageInDB(
             PackageID=package.PackageID,
             PackageName=package.PackageName,
@@ -577,20 +582,43 @@ async def update_booking_status(booking_id: int, status: models.BookingStatus, d
         UserFirstName=user.FirstName,
         UserLastName=user.LastName
     )
-
 @app.delete("/bookings/", response_model=List[schemas.BookingInDB])
-async def delete_bookings(booking_ids: List[int], db: AsyncSession = Depends(database.get_db)):
-    bookings = []
+async def delete_bookings(request: Request, db: AsyncSession = Depends(database.get_db)):
+    body = await request.json()
+    booking_ids = body['ids']
+
+    logger.info(f"Received booking IDs to delete: {booking_ids}")
+
+    deleted_bookings = []
     for booking_id in booking_ids:
-        booking = await db.execute(select(models.Booking).filter(models.Booking.BookingID == booking_id))
-        booking = booking.scalars().first()
-        if booking:
-            await db.delete(booking)
-            await db.commit()
-            bookings.append(booking)
-        else:
-            raise HTTPException(status_code=404, detail=f"Booking with ID {booking_id} not found")
-    return bookings
+        result = await db.execute(select(models.Booking).filter(models.Booking.BookingID == booking_id))
+        booking = result.scalars().first()
+        if booking is None:
+            logger.error(f"Booking with ID {booking_id} not found")
+            raise HTTPException(status_code=404, detail="Booking not found")
+
+        user_result = await db.execute(select(models.User).filter(models.User.UserID == booking.UserID))
+        user = user_result.scalars().first()
+
+        if user is None:
+            logger.error(f"User with ID {booking.UserID} not found")
+            raise HTTPException(status_code=404, detail="User not found")
+
+        await db.delete(booking)
+        await db.commit()
+        response_booking = schemas.BookingInDB(
+            BookingID=booking.BookingID,
+            BookingDate=booking.BookingDate,
+            Status=booking.Status,
+            NumberOfPeople=booking.NumberOfPeople,
+            UserID=booking.UserID,
+            PackageID=booking.PackageID,
+            UserEmail=user.Email,
+            UserFirstName=user.FirstName,
+            UserLastName=user.LastName
+        )
+        deleted_bookings.append(response_booking)
+    return deleted_bookings
 
 @app.delete("/bookings/{booking_id}", response_model=schemas.BookingInDB)
 async def delete_booking(booking_id: int, db: AsyncSession = Depends(database.get_db)):

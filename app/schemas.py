@@ -94,6 +94,11 @@ class PackageInDB(PackageBase):
     class Config:
         orm_mode = True
         from_attributes = True
+class BookingsDeleteRequest(BaseModel):
+    booking_ids: List[int]
+class BookingsDeleteResponse(BaseModel):
+    message: str
+    BookingIDs: List[int]
 class BookingStatus(str, Enum):
     CONFIRMED = "CONFIRMED"
     PENDING = "PENDING"
@@ -116,8 +121,7 @@ class BookingInDB(BookingBase):
     UserLastName: Optional[str]
 
     class Config:
-        orm_mode = True
-
+        orm_mode = True        
 class ReviewBase(BaseModel):
     UserID: int
     PackageID: int

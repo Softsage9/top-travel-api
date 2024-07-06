@@ -67,11 +67,11 @@ class AccountActivation(Base):
 class Destination(Base):
     __tablename__ = 'destinations'
     DestinationID = Column(Integer, primary_key=True, autoincrement=True)
-    DestinationName = Column(String(100))
+    DestinationName = Column(String(100), nullable=True)
     Country = Column(String(50))
     Description = Column(Text)
-    src = Column(String, nullable=True)
-    title = Column(String, nullable=True)
+    src = Column(String(1255), nullable=True)
+    title = Column(String(255), nullable=True)
     rawFile = Column(LargeBinary, nullable=True)
     packages = relationship('Package', back_populates='destination')
 class Package(Base):
@@ -87,10 +87,12 @@ class Package(Base):
     destination = relationship('Destination', back_populates='packages')
     bookings = relationship('Booking', back_populates='package')
     reviews = relationship('Review', back_populates='package')
+
 class BookingStatus(str, Enum):
     CONFIRMED = "CONFIRMED"
     PENDING = "PENDING"
     CANCELLED = "CANCELLED"
+
 class Booking(Base):
     __tablename__ = 'bookings'
     BookingID = Column(Integer, primary_key=True, autoincrement=True)

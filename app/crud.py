@@ -3,7 +3,7 @@ from email.mime.text import MIMEText
 from pathlib import Path
 from shutil import copyfileobj
 import shutil
-from typing import List
+from typing import Any, Dict, List
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import joinedload
@@ -23,7 +23,7 @@ import requests
 from fastapi import Depends, HTTPException, UploadFile
 from jose import JWTError, jwt
 from passlib.context import CryptContext
-from sqlalchemy import asc, desc, func, select
+from sqlalchemy import asc, delete, desc, func, select
 from starlette import status
 
 from . import models, schemas, config
@@ -660,6 +660,30 @@ async def create_booking(db: AsyncSession, booking: schemas.BookingCreate):
         "UserLastName": user.LastName
     }
 
+async def delete_booking(db: AsyncSession, booking_id: int) -> schemas.BookingInDB:
+    result = await db.execute(select(models.Booking).filter(models.Booking.BookingID == booking_id))
+    db_booking = result.scalars().first()
+    if db_booking is None:
+        return None  # Return None if booking not found, handle this in endpoint
+
+    await db.delete(db_booking)
+    await db.commit()
+
+    result = await db.execute(select(models.User).filter(models.User.UserID == db_booking.UserID))
+    user = result.scalars().first()
+
+    return schemas.BookingInDB(
+        BookingID=db_booking.BookingID,
+        UserID=db_booking.UserID,
+        PackageID=db_booking.PackageID,
+        BookingDate=db_booking.BookingDate,
+        Status=db_booking.Status,
+        NumberOfPeople=db_booking.NumberOfPeople,
+        UserEmail=user.Email,
+        UserFirstName=user.FirstName,
+        UserLastName=user.LastName
+    )
+
 
 async def update_booking(db: AsyncSession, booking_id: int, booking: schemas.BookingCreate):
     db_booking = await get_booking(db, booking_id)
@@ -682,24 +706,9 @@ async def update_booking_status(db: AsyncSession, booking_id: int, status: model
         return db_booking
     return None
 
-async def delete_booking(db: AsyncSession, booking_id: int):
-    booking = await get_booking(db, booking_id)
-    if booking is None: 
-        return None
-    user = await get_user_by_id(db, booking.UserID)
-    await db.delete(booking)
+async def delete_bookings(db: AsyncSession, booking_ids: list):
+    await db.execute(delete(models.Booking).where(models.Booking.BookingID.in_(booking_ids)))
     await db.commit()
-    return {
-        "BookingID": booking.BookingID,
-        "UserID": booking.UserID,
-        "PackageID": booking.PackageID,
-        "BookingDate": booking.BookingDate,
-        "Status": booking.Status,
-        "NumberOfPeople": booking.NumberOfPeople,
-        "UserEmail": user.Email,
-        "UserFirstName": user.FirstName,
-        "UserLastName": user.LastName
-    }
 
 # End Of Bookings
 
