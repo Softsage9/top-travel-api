@@ -351,29 +351,12 @@ async def update_destination(destination_id: int, destination: schemas.Destinati
         raise HTTPException(status_code=404, detail="Destination not found")
     return updated_destination
 
-@app.delete("/destinations/", response_model=List[schemas.DestinationInDB])
-async def delete_destinations(destination_ids: List[int], db: AsyncSession = Depends(database.get_db)):
-    deleted_destinations = []
-    for destination_id in destination_ids:
-        result = await db.execute(select(models.Destination).filter(models.Destination.DestinationID == destination_id))
-        destination = result.scalars().first()
-        if destination:
-            await db.delete(destination)
-            await db.commit()
-            response_destination = schemas.DestinationInDB(
-                DestinationID=destination.DestinationID,
-                DestinationName=destination.DestinationName,
-                Country=destination.Country,
-                Description=destination.Description,
-                image=schemas.ImageBase(
-                    title=destination.title,
-                    src=destination.src
-                ) if destination.title and destination.src else None
-            )
-            deleted_destinations.append(response_destination)
-        else:
-            raise HTTPException(status_code=404, detail=f"Destination with ID {destination_id} not found")
-    return deleted_destinations
+@app.delete("/destinations/", response_model=List[int])
+async def delete_many_destinations(delete_request: schemas.DeleteManyRequest, db: AsyncSession = Depends(database.get_db)):
+    deleted_ids = await crud.delete_many_destinations(db, delete_request.ids)
+    if not deleted_ids:
+        raise HTTPException(status_code=404, detail="No destinations found with these IDs")
+    return deleted_ids
 
 @app.delete("/destinations/{destination_id}", response_model=schemas.DestinationInDB)
 async def delete_destination(destination_id: int, db: AsyncSession = Depends(database.get_db)):
@@ -582,50 +565,12 @@ async def update_booking_status(booking_id: int, status: models.BookingStatus, d
         UserFirstName=user.FirstName,
         UserLastName=user.LastName
     )
-@app.delete("/bookings/", response_model=List[schemas.BookingInDB])
-async def delete_bookings(request: Request, db: AsyncSession = Depends(database.get_db)):
-    body = await request.json()
-    booking_ids = body['ids']
-
-    logger.info(f"Received booking IDs to delete: {booking_ids}")
-
-    deleted_bookings = []
-    for booking_id in booking_ids:
-        result = await db.execute(select(models.Booking).filter(models.Booking.BookingID == booking_id))
-        booking = result.scalars().first()
-        if booking is None:
-            logger.error(f"Booking with ID {booking_id} not found")
-            raise HTTPException(status_code=404, detail="Booking not found")
-
-        user_result = await db.execute(select(models.User).filter(models.User.UserID == booking.UserID))
-        user = user_result.scalars().first()
-
-        if user is None:
-            logger.error(f"User with ID {booking.UserID} not found")
-            raise HTTPException(status_code=404, detail="User not found")
-
-        await db.delete(booking)
-        await db.commit()
-        response_booking = schemas.BookingInDB(
-            BookingID=booking.BookingID,
-            BookingDate=booking.BookingDate,
-            Status=booking.Status,
-            NumberOfPeople=booking.NumberOfPeople,
-            UserID=booking.UserID,
-            PackageID=booking.PackageID,
-            UserEmail=user.Email,
-            UserFirstName=user.FirstName,
-            UserLastName=user.LastName
-        )
-        deleted_bookings.append(response_booking)
-    return deleted_bookings
-
-@app.delete("/bookings/{booking_id}", response_model=schemas.BookingInDB)
-async def delete_booking(booking_id: int, db: AsyncSession = Depends(database.get_db)):
-    db_booking = await crud.delete_booking(db, booking_id)
-    if db_booking is None:
-        raise HTTPException(status_code=404, detail="Booking not found")
-    return db_booking
+@app.delete("/bookings/", response_model=List[int])
+async def delete_many_bookings(delete_request: schemas.DeleteManyRequest, db: AsyncSession = Depends(database.get_db)):
+    deleted_ids = await crud.delete_many_bookings(db, delete_request.ids)
+    if not deleted_ids:
+        raise HTTPException(status_code=404, detail="No bookings found with these IDs")
+    return deleted_ids
 
 # End Of Booking Endpoints
 

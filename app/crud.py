@@ -504,14 +504,19 @@ async def update_destination(db: AsyncSession, destination_id: int, destination_
     await db.refresh(db_destination)
     return db_destination
 
-async def delete_destination(db: AsyncSession, destination_id: int):
-    result = await db.execute(select(models.Destination).filter(models.Destination.DestinationID == destination_id))
-    db_destination = result.scalars().first()
-    if db_destination is None:
-        raise HTTPException(status_code=404, detail=f"Destination with ID {destination_id} not found")
-    await db.delete(db_destination)
+async def delete_many_destinations(db: AsyncSession, ids: list[int]) -> list[int]:
+    query = select(models.Destination).where(models.Destination.DestinationID.in_(ids))
+    result = await db.execute(query)
+    destinations = result.scalars().all()
+    if not destinations:
+        raise HTTPException(status_code=404, detail="Destinations not found")
+    
+    for destination in destinations:
+        await db.delete(destination)
     await db.commit()
-    return db_destination
+    
+    return ids
+    
 
 # Package Cruds
 
@@ -660,29 +665,20 @@ async def create_booking(db: AsyncSession, booking: schemas.BookingCreate):
         "UserLastName": user.LastName
     }
 
-async def delete_booking(db: AsyncSession, booking_id: int) -> schemas.BookingInDB:
-    result = await db.execute(select(models.Booking).filter(models.Booking.BookingID == booking_id))
-    db_booking = result.scalars().first()
-    if db_booking is None:
-        return None  # Return None if booking not found, handle this in endpoint
+async def delete_many_bookings(db: AsyncSession, ids: List[int]) -> List[int]:
+    print("Fetching bookings to delete:", ids)
+    result = await db.execute(select(models.Booking).filter(models.Booking.BookingID.in_(ids)))
+    bookings_to_delete = result.scalars().all()
+    
+    if not bookings_to_delete:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bookings not found")
 
-    await db.delete(db_booking)
+    for booking in bookings_to_delete:
+        await db.delete(booking)
+
     await db.commit()
 
-    result = await db.execute(select(models.User).filter(models.User.UserID == db_booking.UserID))
-    user = result.scalars().first()
-
-    return schemas.BookingInDB(
-        BookingID=db_booking.BookingID,
-        UserID=db_booking.UserID,
-        PackageID=db_booking.PackageID,
-        BookingDate=db_booking.BookingDate,
-        Status=db_booking.Status,
-        NumberOfPeople=db_booking.NumberOfPeople,
-        UserEmail=user.Email,
-        UserFirstName=user.FirstName,
-        UserLastName=user.LastName
-    )
+    return [booking.BookingID for booking in bookings_to_delete]
 
 
 async def update_booking(db: AsyncSession, booking_id: int, booking: schemas.BookingCreate):
@@ -705,10 +701,6 @@ async def update_booking_status(db: AsyncSession, booking_id: int, status: model
         await db.refresh(db_booking)
         return db_booking
     return None
-
-async def delete_bookings(db: AsyncSession, booking_ids: list):
-    await db.execute(delete(models.Booking).where(models.Booking.BookingID.in_(booking_ids)))
-    await db.commit()
 
 # End Of Bookings
 

@@ -245,3 +245,6 @@ class ResetForgetPassword(BaseModel):
     new_password: str
     confirm_password: str
 
+class DeleteManyRequest(BaseModel):
+    ids: List[int] = Field(...)
+
