@@ -527,12 +527,32 @@ async def create_package(db: AsyncSession, package: schemas.PackageCreate) -> mo
     await db.refresh(db_package)
     return db_package
 
-async def get_package(db: AsyncSession, package_id: int):
+async def get_package(db: AsyncSession, package_id: int) -> schemas.PackageInDB:
+    # Fetch package by package_id
     result = await db.execute(select(models.Package).filter(models.Package.PackageID == package_id))
     package = result.scalars().first()
 
     if package is None:
+        print(f"Package with ID {package_id} not found")
         return None
+
+    # Fetch destination related to the package
+    destination_result = await db.execute(
+        select(models.Destination).filter(models.Destination.DestinationID == package.DestinationID)
+    )
+    destination = destination_result.scalars().first()
+
+    image_info = None
+    country = None
+
+    if destination:
+        file_name = destination.src.split('\\')[-1] if destination.src else 'default.png'
+        image_info = schemas.ImageBase(
+            rawFile=destination.rawFile,
+            src=f"http://localhost:8000/static/images/{file_name}",
+            title=destination.title,
+        )
+        country = destination.Country
 
     response_package = schemas.PackageInDB(
         PackageID=package.PackageID,
@@ -542,35 +562,97 @@ async def get_package(db: AsyncSession, package_id: int):
         Duration=package.Duration,
         StartDate=package.StartDate,
         EndDate=package.EndDate,
-        DestinationID=package.DestinationID
+        DestinationID=package.DestinationID,
+        Image=image_info,
+        Country=country
     )
     
+    print(f"Fetched package: {response_package}")
     return response_package
 
-async def get_packages(db: AsyncSession, skip: int = 0, limit: int = 10):
+
+async def get_packages(db: AsyncSession, skip: int = 0, limit: int = 10) -> List[schemas.PackageInDB]:
     result = await db.execute(
-        select(models.Package)
-        .offset(skip)
-        .limit(limit)
+        select(models.Package).offset(skip).limit(limit)
     )
     packages = result.scalars().all()
     total = await db.scalar(select(func.count()).select_from(models.Package))
 
-    response_packages = [
-        schemas.PackageInDB(
+    results = []
+    for package in packages:
+        destination_result = await db.execute(
+            select(models.Destination).filter(models.Destination.DestinationID == package.DestinationID)
+        )
+        destination = destination_result.scalars().first()
+
+        image_info = None
+        country = None
+
+        if destination:
+            file_name = destination.src.split('\\')[-1] if destination.src else 'default.png'
+            image_info = {
+                "rawFile": destination.rawFile,
+                "src": f"http://localhost:8000/static/images/{file_name}",
+                "title": destination.title,
+            }
+            country = destination.Country
+        else:
+            image_info = None
+            country = None
+
+        results.append(schemas.PackageInDB(
             PackageID=package.PackageID,
             PackageName=package.PackageName,
             Description=package.Description,
+            Country=country,
             Price=package.Price,
             Duration=package.Duration,
             StartDate=package.StartDate,
             EndDate=package.EndDate,
-            DestinationID=package.DestinationID
+            DestinationID=package.DestinationID,
+            Image=image_info
+        ))
+
+    return results, total
+
+async def get_packages_by_destination_id(db: AsyncSession, destination_id: int) -> List[schemas.PackageInDB]:
+    stmt = select(models.Package).filter(models.Package.DestinationID == destination_id)
+    result = await db.execute(stmt)
+    packages = result.scalars().all()
+
+    results = []
+    for package in packages:
+        destination_result = await db.execute(
+            select(models.Destination).filter(models.Destination.DestinationID == package.DestinationID)
         )
-        for package in packages
-    ]
-    
-    return response_packages, total
+        destination = destination_result.scalars().first()
+
+        image_info = None
+        country = None
+
+        if destination:
+            file_name = destination.src.split('\\')[-1] if destination.src else 'default.png'
+            image_info = schemas.ImageBase(
+                rawFile=destination.rawFile,
+                src=f"http://localhost:8000/static/images/{file_name}",
+                title=destination.title,
+            )
+            country = destination.Country
+
+        results.append(schemas.PackageInDB(
+            PackageID=package.PackageID,
+            PackageName=package.PackageName,
+            Description=package.Description,
+            Country=country,
+            Price=package.Price,
+            Duration=package.Duration,
+            StartDate=package.StartDate,
+            EndDate=package.EndDate,
+            DestinationID=package.DestinationID,
+            Image=image_info
+        ))
+
+    return results
 
 async def update_package(db: AsyncSession, package_id: int, package_update: schemas.PackageUpdate):
     result = await db.execute(select(models.Package).filter(models.Package.PackageID == package_id))
@@ -584,7 +666,40 @@ async def update_package(db: AsyncSession, package_id: int, package_update: sche
     
     await db.commit()
     await db.refresh(db_package)
-    return db_package
+
+    # Fetch destination related to the package to include the Image field in the response
+    destination_result = await db.execute(
+        select(models.Destination).filter(models.Destination.DestinationID == db_package.DestinationID)
+    )
+    destination = destination_result.scalars().first()
+
+    image_info = None
+    country = None
+
+    if destination:
+        file_name = destination.src.split('\\')[-1] if destination.src else 'default.png'
+        image_info = schemas.ImageBase(
+            rawFile=destination.rawFile,
+            src=f"http://localhost:8000/static/images/{file_name}",
+            title=destination.title,
+        )
+        country = destination.Country
+
+    response_package = schemas.PackageInDB(
+        PackageID=db_package.PackageID,
+        PackageName=db_package.PackageName,
+        Description=db_package.Description,
+        Price=db_package.Price,
+        Duration=db_package.Duration,
+        StartDate=db_package.StartDate,
+        EndDate=db_package.EndDate,
+        DestinationID=db_package.DestinationID,
+        Image=image_info,
+        Country=country
+    )
+
+    return response_package
+
 
 async def delete_package(db: AsyncSession, package_id: int):
     result = await db.execute(select(models.Package).filter(models.Package.PackageID == package_id).options(selectinload(models.Package.destination)))

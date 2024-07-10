@@ -400,19 +400,25 @@ async def create_package(
     logger.info("Package created successfully")
     return created_package
     
-
 @app.get("/packages/", response_model=List[schemas.PackageInDB])
 async def read_packages(response: Response, skip: int = 0, limit: int = 10, db: AsyncSession = Depends(database.get_db)):
-    packages, total = await crud.get_packages(db, skip=skip, limit=limit)
+    packages, total = await crud.get_packages(db, skip, limit)
     response.headers["X-Total-Count"] = str(total)
+    return packages
+
+@app.get("/packages-by-destination/{destination_id}", response_model=List[schemas.PackageInDB])
+async def read_packages_by_destination(destination_id: int, db: AsyncSession = Depends(database.get_db)):
+    packages = await crud.get_packages_by_destination_id(db, destination_id)
+    if not packages:
+        raise HTTPException(status_code=404, detail="Packages not found")
     return packages
 
 @app.get("/packages/{package_id}", response_model=schemas.PackageInDB)
 async def read_package(package_id: int, db: AsyncSession = Depends(database.get_db)):
-    db_package = await crud.get_package(db, package_id)
-    if db_package is None:
+    package = await crud.get_package(db, package_id)
+    if package is None:
         raise HTTPException(status_code=404, detail="Package not found")
-    return db_package
+    return package
 
 @app.put("/packages/{package_id}", response_model=schemas.PackageInDB)
 async def update_package(package_id: int, package: schemas.PackageUpdate, db: AsyncSession = Depends(database.get_db)):

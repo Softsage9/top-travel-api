@@ -61,6 +61,7 @@ class ImageBase(BaseModel):
     rawFile: Optional[bytes] = Field(None, description="Raw binary data of the image file")
     src: Optional[str] = Field(None, description="Source URL of the image")
     title: Optional[str] = Field(None, description="Title of the image")
+
 class DestinationBase(BaseModel):
     DestinationName: str
     Country: str
@@ -91,6 +92,8 @@ class PackageUpdate(PackageBase):
     pass
 class PackageInDB(PackageBase):
     PackageID: int = Field(None, description="Unique identifier of the package, automatically generated")
+    Image: Optional[ImageBase]
+    Country: Optional[str] = Field(None, description="Country of the destination")
     class Config:
         orm_mode = True
         from_attributes = True
