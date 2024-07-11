@@ -332,8 +332,24 @@ async def create_destination(
     return created_destination
 
 @app.get("/destinations/", response_model=List[schemas.DestinationInDB])
-async def read_destinations(response: Response, skip: int = 0, limit: int = 10, db: AsyncSession = Depends(database.get_db)):
-    destinations, total = await crud.get_destinations(db, skip=skip, limit=limit)
+async def read_destinations(
+    response: Response, 
+    skip: int = Query(default=0, ge=0), 
+    limit: int = Query(default=10, ge=0),
+    destination_name: str = Query(None),
+    start_date: date = Query(None),
+    end_date: date = Query(None),
+    db: AsyncSession = Depends(database.get_db)
+):
+    destinations, total = await crud.get_destinations(
+        db, 
+        skip=skip, 
+        limit=limit,
+        destination_name=destination_name, 
+        start_date=start_date, 
+        end_date=end_date,
+    )
+
     response.headers["X-Total-Count"] = str(total)
     return destinations
 

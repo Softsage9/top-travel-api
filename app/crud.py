@@ -3,7 +3,7 @@ from email.mime.text import MIMEText
 from pathlib import Path
 from shutil import copyfileobj
 import shutil
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import joinedload
@@ -11,7 +11,7 @@ from sqlalchemy.orm import selectinload
 import logging
 import random
 import smtplib
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 import os
 from dotenv import load_dotenv
 import uuid
@@ -23,7 +23,7 @@ import requests
 from fastapi import Depends, HTTPException, UploadFile
 from jose import JWTError, jwt
 from passlib.context import CryptContext
-from sqlalchemy import asc, delete, desc, func, select
+from sqlalchemy import and_, asc, delete, desc, func, select
 from starlette import status
 
 from . import models, schemas, config
@@ -436,11 +436,40 @@ async def get_destination(db: AsyncSession, destination_id: int):
     
     return response_destination
 
-async def get_destinations(db: AsyncSession, skip: int = 0, limit: int = 10):
-    result = await db.execute(select(models.Destination).offset(skip).limit(limit))
-    destinations = result.scalars().all()
-    total = await db.scalar(select(func.count()).select_from(models.Destination))
+async def get_destinations(
+    db: AsyncSession, 
+    skip: int = 0, 
+    limit: int = 10, 
+    destination_name: Optional[str] = None, 
+    start_date: Optional[date] = None, 
+    end_date: Optional[date] = None, 
+):
+    query = select(models.Destination).options(selectinload(models.Destination.packages))
 
+    if destination_name:
+        query = query.filter(models.Destination.DestinationName.ilike(f"%{destination_name}%"))
+
+    if start_date or end_date:
+        package_conditions = []
+        if start_date:
+            package_conditions.append(models.Package.StartDate >= start_date)
+        if end_date:
+            package_conditions.append(models.Package.EndDate <= end_date)
+
+        query = query.join(models.Destination.packages).filter(and_(*package_conditions))
+
+    # Execute the query with pagination
+    destinations_result = await db.execute(query.offset(skip).limit(limit))
+    
+    # Use .unique().scalars() to handle eager loaded collections
+    destinations = destinations_result.unique().scalars().all()
+
+    # Count total available results without pagination
+    total_count = await db.scalar(
+        select(func.count()).select_from(query.subquery())
+    )
+
+    # Create response format
     response_destinations = [
         schemas.DestinationInDB(
             DestinationID=destination.DestinationID,
@@ -450,13 +479,14 @@ async def get_destinations(db: AsyncSession, skip: int = 0, limit: int = 10):
             image=schemas.ImageBase(
                 title=destination.title,
                 src=destination.src,
-                rawFile=None 
+                rawFile=None
             )
         )
         for destination in destinations
     ]
 
-    return response_destinations, total
+    return response_destinations, total_count
+
 
 async def create_destination(db: AsyncSession, destination: schemas.DestinationCreate):
     try:
