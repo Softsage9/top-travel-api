@@ -68,38 +68,47 @@ async def init_roles():
 async def root():
     return {"message": "Top Travel"}
 
-
 @app.post("/token", response_model=schemas.SessionToken)
-async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: AsyncSession = Depends(database.get_db)):
-    user = await crud.authenticate_user(db, form_data.username, form_data.password)
+async def login_for_access_token(
+    credentials: schemas.LoginCredentials = Depends(),
+    db: AsyncSession = Depends(database.get_db)
+):
+    user = await crud.authenticate_user(db, credentials.email, credentials.password)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username or password",
+            detail="Incorrect email or password",
             headers={"WWW-Authenticate": "Bearer"}
         )
+
+    # Check if user account is disabled
     if user.disabled:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Account is disabled",
         )
+
+    # Check if user account is verified
     if not user.is_verified:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Account is not verified.",
         )
+
+    # Generate JWT token and session token
     jwt_token, session_token = await crud.create_access_token(
-        {"sub": user.username}, db, user.UserID, timedelta(minutes=30)
+        {"sub": user.Email}, db, user.UserID, timedelta(minutes=30)
     )
 
+    # Return the access token and related information
     return {
         "token": jwt_token,
+        "token_type": "bearer",
         "session_token": session_token.token,
         "user_id": user.UserID,
-        "super_admin_id": None,
-        "expiry_date": session_token.expiry_date
+        "expiry_date": session_token.expiry_date.isoformat()  # Using ISO format for datetime
     }
-
+    
 @app.post("/auth/google", response_model=schemas.UserInDB)
 async def google_login(token: str, db: AsyncSession = Depends(database.get_db)):
     user_info = await crud.verify_google_token(token)
@@ -120,7 +129,6 @@ async def google_login(token: str, db: AsyncSession = Depends(database.get_db)):
         )
 
     new_user_data = schemas.UserCreate(
-        username=user_info['email'],
         Email=user_info['email'],
         Password="",
         FirstName=user_info.get('given_name', ''),
@@ -168,25 +176,29 @@ async def read_users_me(current_user: schemas.UserInDB = Depends(crud.get_curren
 
 @app.post("/users/create", response_model=schemas.UserInDB)
 async def create_user_endpoint(user: schemas.UserCreate, db: AsyncSession = Depends(database.get_db)):
+    print(f"Received request to create user: {user.Email}")
+    
     result = await db.execute(
-        select(models.User).filter(
-            (models.User.username == user.username) | (models.User.Email == user.Email)
-        )
+        select(models.User).filter((models.User.Email == user.Email))
     )
     existing_user = result.scalars().first()
 
     if existing_user:
+        print("Email already taken")
         raise HTTPException(
             status_code=400,
-            detail="Username or email already taken"
+            detail="Email already taken"
         )
+
     try:
         new_user = await crud.create_user(db, user)
+        print(f"Created new user with ID: {new_user.UserID}")
 
         # Generates a verification code
         session_token = await crud.create_session_token(db, new_user.UserID)
+        print(f"Generated session token: {session_token.activation_token}")
+
         activation_token = session_token.activation_token
-        
 
         # Loads email credentials
         email_sender = os.getenv("EMAIL_SENDER")
@@ -197,24 +209,30 @@ async def create_user_endpoint(user: schemas.UserCreate, db: AsyncSession = Depe
 
         # Sends a verification email
         await crud.send_verification_email(email_sender, email_password, user.Email, activation_token)
+        print("Sent verification email")
 
         # Assigns role to the user
         result = await db.execute(select(models.Role).filter_by(RoleName=user.Role))
         role = result.scalars().first()
         if not role:
+            print("Role not found")
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Role not found")
-    
+
         user_role = models.UserRole(
             UserID=new_user.UserID,
             RoleID=role.RoleID
         )
         db.add(user_role)
         await db.commit()
+        print(f"Assigned role {user.Role} to user {new_user.UserID}")
+
     except Exception as e:
         await db.rollback()
+        print(f"Error occurred: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
     return new_user
+
 
 # End Of Create User Endpoint
 
@@ -256,7 +274,7 @@ async def get_user(user_id: int, db: AsyncSession = Depends(database.get_db)):
 async def delete_user(user_id: int, db: AsyncSession = Depends(database.get_db)):
     db_event = await crud.delete_user(db, user_id=user_id)
     if db_event is None:
-        raise HTTPException(status_code=404, detail="Event not found")
+        raise HTTPException(status_code=404, detail="User not found")
     return db_event
 
 @app.post("/verify-user")
@@ -443,28 +461,12 @@ async def update_package(package_id: int, package: schemas.PackageUpdate, db: As
         raise HTTPException(status_code=404, detail="Package not found")
     return schemas.PackageInDB.from_orm(updated_package)
 
-@app.delete("/packages/", response_model=List[schemas.PackageInDB])
-async def delete_packages(request: Request, db: AsyncSession = Depends(database.get_db)):
-    body = await request.json()
-    package_ids = body['ids']
-
-    deleted_packages = []
-    for package_id in package_ids:
-        package = await crud.delete_package(db, package_id)
-        if package is None:
-            raise HTTPException(status_code=404, detail=f"Package with ID {package_id} not found")
-        package_data = schemas.PackageInDB(
-            PackageID=package.PackageID,
-            PackageName=package.PackageName,
-            Description=package.Description,
-            Price=package.Price,
-            Duration=package.Duration,
-            StartDate=package.StartDate,
-            EndDate=package.EndDate,
-            DestinationID=package.DestinationID
-        )
-        deleted_packages.append(package_data)
-    return deleted_packages
+@app.delete("/packages/", response_model=List[int])
+async def delete_many_packages(delete_request: schemas.DeleteManyRequest, db: AsyncSession = Depends(database.get_db)):
+    deleted_ids = await crud.delete_many_packages(db, delete_request.ids)
+    if not deleted_ids:
+        raise HTTPException(status_code=404, detail="No packages found with these IDs")
+    return deleted_ids
 
 @app.delete("/packages/{package_id}", response_model=schemas.PackageInDB)
 async def delete_package(package_id: int, db: AsyncSession = Depends(database.get_db)):

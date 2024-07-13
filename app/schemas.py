@@ -1,4 +1,5 @@
 from enum import Enum
+from fastapi import Form
 from pydantic import BaseModel, EmailStr, Field
 from typing import List, Optional
 from datetime import date, datetime
@@ -9,7 +10,7 @@ from app.models import BookingStatus
 class UserBase(BaseModel):
     FirstName: str
     LastName: str
-    username: str
+    # username: Optional[str] = None
     Email: EmailStr
     Phone: str
     DateOfBirth: date
@@ -203,7 +204,6 @@ class PasswordReset(PasswordResetBase):
     class Config:
         orm_mode = True
 
-
 class AccountActivationBase(BaseModel):
     activation_token: str = Field(..., description="The activation token sent to the user's email")
 
@@ -251,3 +251,6 @@ class ResetForgetPassword(BaseModel):
 class DeleteManyRequest(BaseModel):
     ids: List[int] = Field(...)
 
+class LoginCredentials(BaseModel):
+    email: str
+    password: str

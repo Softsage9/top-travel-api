@@ -33,7 +33,6 @@ from app import database
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
-oauth2_admin_scheme = OAuth2PasswordBearer(tokenUrl="admin-login")
 
 load_dotenv()
 
@@ -42,10 +41,9 @@ ALGORITHM = os.getenv("ALGORITHM", "HS256")
 
 # Get Users Crud
 
-async def get_user(db: AsyncSession, username: str):
-    result = await db.execute(select(models.User).where(models.User.username == username))
+async def get_user(db: AsyncSession, email: str):
+    result = await db.execute(select(models.User).where(models.User.Email == email))
     return result.scalars().first()
-
 
 async def get_all_users(
         db: AsyncSession,
@@ -107,16 +105,16 @@ async def get_current_user(
 
     try:
         payload = jwt.decode(token, database.SECRET_KEY, algorithms=[database.ALGORITHM])  # Decoding JWT
-        username = payload.get("sub")  # Get user ID from 'sub'
+        email = payload.get("sub")  # Get user ID from 'sub'
 
-        if username is None:
+        if email is None:
             raise credential_exception
 
-        token_data = schemas.TokenData(username=username)
+        token_data = schemas.TokenData(email=email)
     except JWTError:
         raise credential_exception
 
-    user = await get_user(db, username=token_data.username)
+    user = await get_user(db, email=token_data.email)
     if user is None:
         raise credential_exception
 
@@ -139,13 +137,13 @@ def verify_password(plain_password, password_hash):
     return pwd_context.verify(plain_password, password_hash)
 
 
-async def authenticate_user(db: AsyncSession, username: str, password: str):
-    user = await get_user(db, username)
+async def authenticate_user(db: AsyncSession, email: str, password: str):
+    user = await get_user_email(db, email)
     if not user:
-        logging.error(f"User {username} not found")
+        logging.error(f"User {email} not found")
         return None
     if not verify_password(password, user.Password):
-        logging.error(f"Password for user {username} is incorrect")
+        logging.error(f"Password for user {email} is incorrect")
         return None
     return user
 
@@ -200,9 +198,8 @@ async def verify_google_token(token: str):
 
 async def create_user(db: AsyncSession, user: schemas.UserCreate, is_google_login: bool = False):
     db_user = models.User(
-        username=user.username,
         Email=user.Email,
-         Password=get_password_hash(user.Password) if not is_google_login else "",
+        Password=get_password_hash(user.Password) if not is_google_login else "",
         FirstName=user.FirstName,
         LastName=user.LastName,
         Phone=user.Phone,
@@ -226,7 +223,6 @@ def generate_six_digit_code():
 
 async def create_session_token(db: AsyncSession, user_id: int):
     activation_code = generate_six_digit_code()
-
     expiry_date = datetime.now(timezone.utc) + timedelta(days=1)
 
     account_activation = models.AccountActivation(
@@ -238,6 +234,8 @@ async def create_session_token(db: AsyncSession, user_id: int):
     db.add(account_activation)
     await db.commit()
     await db.refresh(account_activation)
+
+    print(f"Created session token for user ID {user_id}: {activation_code}")
 
     return account_activation
 
@@ -301,6 +299,7 @@ async def send_verification_email(email_sender, email_password, email_receiver, 
 
     try:
         validate_email(email_receiver)  # Validate email format
+        print(f"Email {email_receiver} is valid")
         await asyncio.to_thread(send_email)  # Run blocking function in a separate thread
     except EmailNotValidError as e:
         print(f"Invalid email address: {e}")
@@ -550,12 +549,44 @@ async def delete_many_destinations(db: AsyncSession, ids: list[int]) -> list[int
 
 # Package Cruds
 
-async def create_package(db: AsyncSession, package: schemas.PackageCreate) -> models.Package:
+async def create_package(db: AsyncSession, package: schemas.PackageCreate) -> schemas.PackageInDB:
+    # Create the package instance
     db_package = models.Package(**package.dict())
     db.add(db_package)
     await db.commit()
     await db.refresh(db_package)
-    return db_package
+
+    # Fetch the related destination information
+    destination_result = await db.execute(
+        select(models.Destination).filter(models.Destination.DestinationID == db_package.DestinationID)
+    )
+    destination = destination_result.scalars().first()
+
+    image_info = None
+    country = None
+
+    if destination:
+        file_name = destination.src.split('\\')[-1] if destination.src else 'default.png'
+        image_info = {
+            "rawFile": destination.rawFile,
+            "src": f"http://localhost:8000/static/images/{file_name}",
+            "title": destination.title,
+        }
+        country = destination.Country
+
+    # Return the package with the necessary additional information
+    return schemas.PackageInDB(
+        PackageID=db_package.PackageID,
+        PackageName=db_package.PackageName,
+        Description=db_package.Description,
+        Country=country,
+        Price=db_package.Price,
+        Duration=db_package.Duration,
+        StartDate=db_package.StartDate,
+        EndDate=db_package.EndDate,
+        DestinationID=db_package.DestinationID,
+        Image=image_info
+    )
 
 async def get_package(db: AsyncSession, package_id: int) -> schemas.PackageInDB:
     # Fetch package by package_id
@@ -739,6 +770,19 @@ async def delete_package(db: AsyncSession, package_id: int):
     await db.delete(package)
     await db.commit()
     return package
+
+async def delete_many_packages(db: AsyncSession, ids: list[int]) -> list[int]:
+    query = select(models.Package).where(models.Package.PackageID.in_(ids))
+    result = await db.execute(query)
+    packages = result.scalars().all()
+    if not packages:
+        raise HTTPException(status_code=404, detail="Packages not found")
+    
+    for package in packages:
+        await db.delete(package)
+    await db.commit()
+    
+    return ids
 
 # End Of Package
 
