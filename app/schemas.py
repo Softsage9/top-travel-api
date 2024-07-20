@@ -164,6 +164,7 @@ class PaymentInDB(PaymentBase):
 
 class SessionTokenBase(BaseModel):
     token: str = Field(..., description="The unique token")
+    token_type: str
     session_token: str = Field(..., description="The unique session token")
 
 class SessionTokenCreate(SessionTokenBase):

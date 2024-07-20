@@ -70,9 +70,10 @@ async def root():
 
 @app.post("/token", response_model=schemas.SessionToken)
 async def login_for_access_token(
-    credentials: schemas.LoginCredentials = Depends(),
+    credentials: schemas.LoginCredentials = Body(...),
     db: AsyncSession = Depends(database.get_db)
 ):
+    logging.info(f"Received credentials: {credentials}")
     user = await crud.authenticate_user(db, credentials.email, credentials.password)
     if not user:
         raise HTTPException(
@@ -104,9 +105,9 @@ async def login_for_access_token(
     return {
         "token": jwt_token,
         "token_type": "bearer",
-        "session_token": session_token.token,
+        "session_token": session_token.session_token,
         "user_id": user.UserID,
-        "expiry_date": session_token.expiry_date.isoformat()  # Using ISO format for datetime
+        "expiry_date": session_token.expiry_date.isoformat()
     }
     
 @app.post("/auth/google", response_model=schemas.UserInDB)
@@ -146,26 +147,14 @@ async def google_login(token: str, db: AsyncSession = Depends(database.get_db)):
     )
 
 
-
 @app.post("/logout", response_model=schemas.Message)
-async def logout(session_token: str = Query(None), google_token: str = Query(None), db: AsyncSession = Depends(database.get_db)):
-    if session_token:
-        existing_token = await crud.get_session_token(db, session_token)
-        logging.info(f"Existing_token: {existing_token}")
-        if existing_token is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session token not found")
-        await crud.delete_session_token(db, session_token)
-        return {"message": "Logged out successfully"}
-
+async def logout(token: str = Query(None), google_token: str = Query(None), db: AsyncSession = Depends(database.get_db)):
+    if token:
+        return await crud.handle_logout(token, db, "Session token not found")
     elif google_token:
-        existing_google_token = await crud.get_session_token(db, google_token)
-        if existing_google_token is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Google session token not found")
-        await crud.delete_session_token(db, google_token)
-        return {"message": "Google session token deleted successfully"}
-
+        return await crud.handle_logout(google_token, db, "Google session token not found")
     else:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Neither session token nor Google token provided")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No token provided")
 
 
 @app.get("/users/me/", response_model=schemas.UserInDB)
@@ -514,7 +503,6 @@ async def read_bookings(response: Response, skip: int = 0, limit: int = 10, db: 
 
     return results
 
-
 @app.get("/bookings/pending", response_model=List[schemas.BookingInDB])
 async def read_pending_bookings(skip: int = 0, limit: int = 10, db: AsyncSession = Depends(database.get_db)):
     db_bookings = await crud.get_bookings_by_status(db, models.BookingStatus.PENDING, skip=skip, limit=limit)
@@ -659,7 +647,7 @@ async def forgot_password(email: schemas.ForgotPassword, db: AsyncSession = Depe
     password_reset_token = await crud.insert_password_reset_token(user_id, secret_token, expiration_date, db)
     await crud.send_reset_password_email(email_sender, email_password, email.email, secret_token)
 
-    return password_reset_token
+    return {"success": True, "message": "Password reset link sent", "data": password_reset_token}
 
 @app.post("/reset-password", response_model=schemas.SuccessMessage)
 async def reset_password(rfp: schemas.ResetForgetPassword, db: AsyncSession = Depends(database.get_db)):

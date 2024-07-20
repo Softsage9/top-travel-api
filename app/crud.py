@@ -32,7 +32,7 @@ from fastapi.security import OAuth2PasswordBearer
 from app import database
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+# oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
 load_dotenv()
 
@@ -94,7 +94,7 @@ async def get_user_by_google_id(db: AsyncSession, google_id: str):
     return result.scalars().first()
 
 async def get_current_user(
-        token: str = Depends(oauth2_scheme),
+        token: str = Depends(schemas.LoginCredentials),
         db: AsyncSession = Depends(database.get_db)
 ):
     credential_exception = HTTPException(
@@ -114,7 +114,7 @@ async def get_current_user(
     except JWTError:
         raise credential_exception
 
-    user = await get_user(db, email=token_data.email)
+    user = await get_user_email(db, email=token_data.email)
     if user is None:
         raise credential_exception
 
@@ -148,14 +148,15 @@ async def authenticate_user(db: AsyncSession, email: str, password: str):
     return user
 
 async def create_access_token(data: dict, db: AsyncSession, user_id: int, expires_delta: timedelta or None = None):
-    token = str(uuid.uuid4())
+    session_token_str = str(uuid.uuid4())  # This is the session token
     expiry_date = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=15))
     to_encode = data.copy()
 
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
     session_token = models.SessionToken(
-        token=token,
+        token=encoded_jwt, 
+        session_token=session_token_str,  
         user_id=user_id,
         expiry_date=expiry_date
     )
@@ -165,6 +166,7 @@ async def create_access_token(data: dict, db: AsyncSession, user_id: int, expire
     await db.refresh(session_token)  
 
     return encoded_jwt, session_token
+
 
 async def create_google_session_token(db: AsyncSession, user_id: int, google_access_token: str,
                                 expires_delta: timedelta or None = None):
@@ -261,6 +263,14 @@ async def delete_session_token(db: AsyncSession, token: str):
     logging.error(f"Session token {token} not found for deletion")
     return False
 
+async def handle_logout(token: str, db: AsyncSession, error_message: str):
+    existing_token = await get_session_token(db, token)
+    if existing_token is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=error_message)
+
+    await delete_session_token(db, token)
+    return {"message": "Logged out successfully"}
+
 # Send Email Verification
 
 async def send_verification_email(email_sender, email_password, email_receiver, code):
@@ -319,6 +329,9 @@ async def send_reset_password_email(email_sender, email_password, email_receiver
 
     Reset Code: {reset_code}
 
+    You can reset your password using the following link:
+    http://localhost:3000/forgot-password?reset_code={reset_code}
+
     This code will expire in 24 hours.
 
     If you did not request this, please ignore this email.
@@ -327,6 +340,22 @@ async def send_reset_password_email(email_sender, email_password, email_receiver
     The Top Travel Team
     """
     message.attach(MIMEText(body, 'plain'))
+
+    def send_email():
+        try:
+            smtp_obj = smtplib.SMTP_SSL(smtp_server, smtp_port)
+            smtp_obj.login(email_sender, email_password)
+            smtp_obj.send_message(message)
+            smtp_obj.quit()
+            print('Reset password email sent successfully.')
+        except Exception as e:
+            print(f"Failed to send reset password email: {e}")
+
+    try:
+        validate_email(email_receiver)  
+        await asyncio.to_thread(send_email)  
+    except EmailNotValidError as e:
+        print(f"Invalid email address: {e}")   
 
     def send_email():
         try:
@@ -796,6 +825,15 @@ async def get_bookings(db: AsyncSession, skip: int = 0, limit: int = 10):
 
 async def get_booking(db: AsyncSession, booking_id: int):
     result = await db.execute(select(models.Booking).filter(models.Booking.BookingID == booking_id))
+    booking = result.scalars().first()
+    return booking
+
+async def get_booking_with_user(db: AsyncSession, booking_id: int):
+    result = await db.execute(
+        select(models.Booking)
+        .options(joinedload(models.Booking.user))
+        .filter(models.Booking.BookingID == booking_id)
+    )
     booking = result.scalars().first()
     return booking
 
