@@ -327,10 +327,8 @@ async def send_reset_password_email(email_sender, email_password, email_receiver
 
     We received a request to reset your password for your Top Travel account. Please use the following reset code to change your password:
 
-    Reset Code: {reset_code}
-
     You can reset your password using the following link:
-    http://localhost:3000/forgot-password?reset_code={reset_code}
+    http://localhost:3000/reset-password?secret_token={reset_code}
 
     This code will expire in 24 hours.
 
@@ -355,23 +353,7 @@ async def send_reset_password_email(email_sender, email_password, email_receiver
         validate_email(email_receiver)  
         await asyncio.to_thread(send_email)  
     except EmailNotValidError as e:
-        print(f"Invalid email address: {e}")   
-
-    def send_email():
-        try:
-            smtp_obj = smtplib.SMTP_SSL(smtp_server, smtp_port)
-            smtp_obj.login(email_sender, email_password)
-            smtp_obj.send_message(message)
-            smtp_obj.quit()
-            print('Reset password email sent successfully.')
-        except Exception as e:
-            print(f"Failed to send reset password email: {e}")
-
-    try:
-        validate_email(email_receiver)  
-        await asyncio.to_thread(send_email)  
-    except EmailNotValidError as e:
-        print(f"Invalid email address: {e}")      
+        print(f"Invalid email address: {e}")       
         
 # End Of Send Email Verification
 
