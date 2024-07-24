@@ -9,7 +9,7 @@ class User(Base):
     google_id = Column(String(255), unique=True, index=True, nullable=True)
     FirstName = Column(String(50))
     LastName = Column(String(50))
-    username = Column(String(50), unique=True)
+    # username = Column(String(50), unique=True, nullable=True)
     Email = Column(String(100), unique=True)
     Password = Column(String(255))
     Phone = Column(String(20))
