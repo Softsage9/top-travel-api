@@ -1,29 +1,30 @@
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 import logging
 import os
 from pathlib import Path
-from typing import List
+import shutil
+from typing import List, Optional
+import uuid
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Body, Depends, FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile, logger
 from fastapi.security import OAuth2PasswordRequestForm
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from starlette import status
-
-from . import crud, models, schemas, database
-from .database import async_session, engine
+import aiofiles
+from . import crud, models, schemas, database, config
+from .database import async_session
 
 app = FastAPI()
 
-IMAGEDIR = Path(__file__).parent.parent / "static/images"
-
-app.mount("/static", StaticFiles(directory="static"), name="static")
+app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 origins = [
     "http://localhost:5173", 
     "http://localhost:5174",
+    "http://localhost:3000",
 ]
 
 app.add_middleware(
@@ -32,11 +33,15 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Total-Count"],
 )
 
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
 load_dotenv()
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 async def init_models():
     async with database.engine.begin() as conn:
@@ -57,64 +62,99 @@ async def init_roles():
                 if not role:
                     new_role = models.Role(RoleName=role_name)
                     session.add(new_role)
-                    await session.commit()
+                    await session.commit()  
 
 @app.get("/")
 async def root():
     return {"message": "Top Travel"}
 
-
 @app.post("/token", response_model=schemas.SessionToken)
-async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: AsyncSession = Depends(database.get_db)):
-    user = await crud.authenticate_user(db, form_data.username, form_data.password)
+async def login_for_access_token(
+    credentials: schemas.LoginCredentials = Body(...),
+    db: AsyncSession = Depends(database.get_db)
+):
+    logging.info(f"Received credentials: {credentials}")
+    user = await crud.authenticate_user(db, credentials.email, credentials.password)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username or password",
+            detail="Incorrect email or password",
             headers={"WWW-Authenticate": "Bearer"}
         )
+
+    # Check if user account is disabled
     if user.disabled:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Account is disabled",
         )
+
+    # Check if user account is verified
     if not user.is_verified:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Account is not verified.",
         )
+
+    # Generate JWT token and session token
     jwt_token, session_token = await crud.create_access_token(
-        {"sub": user.username}, db, user.UserID, timedelta(minutes=30)
+        {"sub": user.Email}, db, user.UserID, timedelta(minutes=30)
     )
 
+    # Return the access token and related information
     return {
         "token": jwt_token,
-        "session_token": session_token.token,
+        "token_type": "bearer",
+        "session_token": session_token.session_token,
         "user_id": user.UserID,
-        "super_admin_id": None,
-        "expiry_date": session_token.expiry_date
+        "expiry_date": session_token.expiry_date.isoformat()
     }
+    
+@app.post("/auth/google", response_model=schemas.UserInDB)
+async def google_login(token: str, db: AsyncSession = Depends(database.get_db)):
+    user_info = await crud.verify_google_token(token)
+
+    existing_user = await db.execute(select(models.User).filter(models.User.Email == user_info['email']))
+    existing_user = existing_user.scalars().first()
+
+    if existing_user:
+        if not existing_user.google_id:
+            existing_user.google_id = user_info['sub']
+            await db.commit()
+            await db.refresh(existing_user)
+
+        session_token = await crud.create_google_session_token(db, existing_user.UserID, token)
+        return schemas.UserInDB(
+            **existing_user.__dict__,
+            session_token=session_token.token
+        )
+
+    new_user_data = schemas.UserCreate(
+        Email=user_info['email'],
+        Password="",
+        FirstName=user_info.get('given_name', ''),
+        LastName=user_info.get('family_name', ''),
+        Phone="",
+        DateOfBirth=None,
+        google_id=user_info['sub']
+    )
+
+    new_user = await crud.create_user(db, new_user_data, is_google_login=True)
+    session_token = await crud.create_google_session_token(db, new_user.UserID, token)
+    return schemas.UserInDB(
+        **new_user.__dict__,
+        session_token=session_token.token
+    )
 
 
 @app.post("/logout", response_model=schemas.Message)
-async def logout(session_token: str = Query(None), google_token: str = Query(None), db: AsyncSession = Depends(database.get_db)):
-    if session_token:
-        existing_token = await crud.get_session_token(db, session_token)
-        logging.info(f"Existing_token: {existing_token}")
-        if existing_token is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session token not found")
-        await crud.delete_session_token(db, session_token)
-        return {"message": "Logged out successfully"}
-
+async def logout(token: str = Query(None), google_token: str = Query(None), db: AsyncSession = Depends(database.get_db)):
+    if token:
+        return await crud.handle_logout(token, db, "Session token not found")
     elif google_token:
-        existing_google_token = await crud.get_session_token(db, google_token)
-        if existing_google_token is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Google session token not found")
-        await crud.delete_session_token(db, google_token)
-        return {"message": "Google session token deleted successfully"}
-
+        return await crud.handle_logout(google_token, db, "Google session token not found")
     else:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Neither session token nor Google token provided")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No token provided")
 
 
 @app.get("/users/me/", response_model=schemas.UserInDB)
@@ -125,25 +165,29 @@ async def read_users_me(current_user: schemas.UserInDB = Depends(crud.get_curren
 
 @app.post("/users/create", response_model=schemas.UserInDB)
 async def create_user_endpoint(user: schemas.UserCreate, db: AsyncSession = Depends(database.get_db)):
+    print(f"Received request to create user: {user.Email}")
+    
     result = await db.execute(
-        select(models.User).filter(
-            (models.User.username == user.username) | (models.User.Email == user.Email)
-        )
+        select(models.User).filter((models.User.Email == user.Email))
     )
     existing_user = result.scalars().first()
 
     if existing_user:
+        print("Email already taken")
         raise HTTPException(
             status_code=400,
-            detail="Username or email already taken"
+            detail="Email already taken"
         )
+
     try:
         new_user = await crud.create_user(db, user)
+        print(f"Created new user with ID: {new_user.UserID}")
 
         # Generates a verification code
         session_token = await crud.create_session_token(db, new_user.UserID)
+        print(f"Generated session token: {session_token.activation_token}")
+
         activation_token = session_token.activation_token
-        
 
         # Loads email credentials
         email_sender = os.getenv("EMAIL_SENDER")
@@ -154,31 +198,59 @@ async def create_user_endpoint(user: schemas.UserCreate, db: AsyncSession = Depe
 
         # Sends a verification email
         await crud.send_verification_email(email_sender, email_password, user.Email, activation_token)
+        print("Sent verification email")
 
         # Assigns role to the user
         result = await db.execute(select(models.Role).filter_by(RoleName=user.Role))
         role = result.scalars().first()
         if not role:
+            print("Role not found")
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Role not found")
-    
+
         user_role = models.UserRole(
             UserID=new_user.UserID,
             RoleID=role.RoleID
         )
         db.add(user_role)
         await db.commit()
+        print(f"Assigned role {user.Role} to user {new_user.UserID}")
+
     except Exception as e:
         await db.rollback()
+        print(f"Error occurred: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
     return new_user
 
+
 # End Of Create User Endpoint
 
-@app.get("/users/", response_model=list[schemas.UserInDB])
-async def get_users(skip: int = 0, limit: int = 100, db: AsyncSession = Depends(database.get_db)):
-    events = await crud.get_all_users(db, skip=skip, limit=limit)
-    return events
+@app.get("/users/", response_model=List[schemas.UserInDB])
+async def get_users(
+    response: Response,  # Include the Response object here (non-default argument)
+    skip: int = 0, 
+    limit: int = 10, 
+    _sort: str = "UserID", 
+    _order: str = "asc", 
+    db: AsyncSession = Depends(database.get_db)
+):
+    try:
+        users = await crud.get_all_users(db, page=skip // limit, limit=limit, sort=_sort, order=_order)
+        
+        # Count total users
+        total = await db.scalar(select(func.count()).select_from(models.User))
+
+        # Set X-Total-Count header
+        response.headers["X-Total-Count"] = str(total)
+        
+        return users
+    except ValueError as ve:
+        logging.error(f"Invalid sort field: {_sort}")
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        logging.error(f"Error fetching users: {e}")
+        raise HTTPException(status_code=500, detail="Internal Server Error")
+
 
 @app.get("/users/{user_id}", response_model=schemas.UserInDB)
 async def get_user(user_id: int, db: AsyncSession = Depends(database.get_db)):
@@ -191,7 +263,7 @@ async def get_user(user_id: int, db: AsyncSession = Depends(database.get_db)):
 async def delete_user(user_id: int, db: AsyncSession = Depends(database.get_db)):
     db_event = await crud.delete_user(db, user_id=user_id)
     if db_event is None:
-        raise HTTPException(status_code=404, detail="Event not found")
+        raise HTTPException(status_code=404, detail="User not found")
     return db_event
 
 @app.post("/verify-user")
@@ -224,12 +296,68 @@ async def verify_code(request: schemas.VerifyCodeRequest, db: AsyncSession = Dep
 # Destination Endpoints
 
 @app.post("/destinations/", response_model=schemas.DestinationInDB)
-async def create_destination(destination: schemas.DestinationCreate, db: AsyncSession = Depends(database.get_db)):
-    return await crud.create_destination(db, destination)
+async def create_destination(
+        DestinationName: str = Form(...),
+        Country: str = Form(...),
+        Description: Optional[str] = Form(None),
+        image: UploadFile = File(None),
+        db: AsyncSession = Depends(database.get_db)
+):
+    logger.info("Received request to create a destination")
+    
+    if image:
+        filename = f"{uuid.uuid4()}{Path(image.filename).suffix}"
+        file_path = config.IMAGEDIR / filename
+
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(image.file, buffer)
+        
+        title = DestinationName
+        src = str(file_path)
+    else:
+        title = None
+        src = None
+    
+    image_data = schemas.ImageBase(
+        title=title,
+        src=src,
+    )
+
+    destination_data = schemas.DestinationCreate(
+        DestinationName=DestinationName,
+        Country=Country,
+        Description=Description,
+        image=image_data
+    )
+
+    created_destination = await crud.create_destination(db, destination_data)
+    
+    if not created_destination:
+        raise HTTPException(status_code=500, detail="Failed to create the destination")
+    
+    logger.info("Package created successfully")
+    return created_destination
 
 @app.get("/destinations/", response_model=List[schemas.DestinationInDB])
-async def read_destinations(skip: int = 0, limit: int = 10, db: AsyncSession = Depends(database.get_db)):
-    destinations = await crud.get_destinations(db, skip=skip, limit=limit)
+async def read_destinations(
+    response: Response, 
+    skip: int = Query(default=0, ge=0), 
+    limit: int = Query(default=10, ge=0),
+    destination_name: str = Query(None),
+    start_date: date = Query(None),
+    end_date: date = Query(None),
+    db: AsyncSession = Depends(database.get_db)
+):
+    destinations, total = await crud.get_destinations(
+        db, 
+        skip=skip, 
+        limit=limit,
+        destination_name=destination_name, 
+        start_date=start_date, 
+        end_date=end_date,
+    )
+
+    response.headers["X-Total-Count"] = str(total)
     return destinations
 
 @app.get("/destinations/{destination_id}", response_model=schemas.DestinationInDB)
@@ -241,10 +369,17 @@ async def read_destination(destination_id: int, db: AsyncSession = Depends(datab
 
 @app.put("/destinations/{destination_id}", response_model=schemas.DestinationInDB)
 async def update_destination(destination_id: int, destination: schemas.DestinationCreate, db: AsyncSession = Depends(database.get_db)):
-    db_destination = await crud.update_destination(db, destination_id, destination)
-    if db_destination is None:
+    updated_destination = await crud.update_destination(db, destination_id, destination)
+    if updated_destination is None:
         raise HTTPException(status_code=404, detail="Destination not found")
-    return db_destination
+    return updated_destination
+
+@app.delete("/destinations/", response_model=List[int])
+async def delete_many_destinations(delete_request: schemas.DeleteManyRequest, db: AsyncSession = Depends(database.get_db)):
+    deleted_ids = await crud.delete_many_destinations(db, delete_request.ids)
+    if not deleted_ids:
+        raise HTTPException(status_code=404, detail="No destinations found with these IDs")
+    return deleted_ids
 
 @app.delete("/destinations/{destination_id}", response_model=schemas.DestinationInDB)
 async def delete_destination(destination_id: int, db: AsyncSession = Depends(database.get_db)):
@@ -258,27 +393,69 @@ async def delete_destination(destination_id: int, db: AsyncSession = Depends(dat
 # Package Endpoints
 
 @app.post("/packages/", response_model=schemas.PackageInDB)
-async def create_package(package: schemas.PackageCreate, db: AsyncSession = Depends(database.get_db)):
-    return await crud.create_package(db, package)
+async def create_package(
+        PackageName: str = Form(...),
+        Description: Optional[str] = Form(None),
+        Price: float = Form(...),
+        Duration: int = Form(...),
+        StartDate: date = Form(...),
+        EndDate: date = Form(...),
+        DestinationID: int = Form(...),
+        db: AsyncSession = Depends(database.get_db)
+):
+    logger.info("Received request to create a package")
+    
+    package_data = schemas.PackageCreate(
+        PackageName=PackageName,
+        Description=Description,
+        Price=Price,
+        Duration=Duration,
+        StartDate=StartDate,
+        EndDate=EndDate,
+        DestinationID=DestinationID
+    )
 
+    created_package = await crud.create_package(db, package_data)
+    
+    if not created_package:
+        raise HTTPException(status_code=500, detail="Failed to create the package")
+    
+    logger.info("Package created successfully")
+    return created_package
+    
 @app.get("/packages/", response_model=List[schemas.PackageInDB])
-async def read_packages(skip: int = 0, limit: int = 10, db: AsyncSession = Depends(database.get_db)):
-    packages = await crud.get_packages(db, skip=skip, limit=limit)
+async def read_packages(response: Response, skip: int = 0, limit: int = 10, db: AsyncSession = Depends(database.get_db)):
+    packages, total = await crud.get_packages(db, skip, limit)
+    response.headers["X-Total-Count"] = str(total)
+    return packages
+
+@app.get("/packages-by-destination/{destination_id}", response_model=List[schemas.PackageInDB])
+async def read_packages_by_destination(destination_id: int, db: AsyncSession = Depends(database.get_db)):
+    packages = await crud.get_packages_by_destination_id(db, destination_id)
+    if not packages:
+        raise HTTPException(status_code=404, detail="Packages not found")
     return packages
 
 @app.get("/packages/{package_id}", response_model=schemas.PackageInDB)
 async def read_package(package_id: int, db: AsyncSession = Depends(database.get_db)):
-    db_package = await crud.get_package(db, package_id)
-    if db_package is None:
+    package = await crud.get_package(db, package_id)
+    if package is None:
         raise HTTPException(status_code=404, detail="Package not found")
-    return db_package
+    return package
 
 @app.put("/packages/{package_id}", response_model=schemas.PackageInDB)
-async def update_package(package_id: int, package: schemas.PackageCreate, db: AsyncSession = Depends(database.get_db)):
-    db_package = await crud.update_package(db, package_id, package)
-    if db_package is None:
+async def update_package(package_id: int, package: schemas.PackageUpdate, db: AsyncSession = Depends(database.get_db)):
+    updated_package = await crud.update_package(db, package_id, package)
+    if updated_package is None:
         raise HTTPException(status_code=404, detail="Package not found")
-    return db_package
+    return schemas.PackageInDB.from_orm(updated_package)
+
+@app.delete("/packages/", response_model=List[int])
+async def delete_many_packages(delete_request: schemas.DeleteManyRequest, db: AsyncSession = Depends(database.get_db)):
+    deleted_ids = await crud.delete_many_packages(db, delete_request.ids)
+    if not deleted_ids:
+        raise HTTPException(status_code=404, detail="No packages found with these IDs")
+    return deleted_ids
 
 @app.delete("/packages/{package_id}", response_model=schemas.PackageInDB)
 async def delete_package(package_id: int, db: AsyncSession = Depends(database.get_db)):
@@ -296,33 +473,35 @@ async def create_booking(booking: schemas.BookingCreate, db: AsyncSession = Depe
     return await crud.create_booking(db, booking)
 
 @app.get("/bookings/", response_model=List[schemas.BookingInDB])
-async def read_bookings(skip: int = 0, limit: int = 10, db: AsyncSession = Depends(database.get_db)):
+async def read_bookings(response: Response, skip: int = 0, limit: int = 10, db: AsyncSession = Depends(database.get_db)):
     result = await db.execute(
         select(models.Booking).offset(skip).limit(limit)
     )
     bookings = result.scalars().all()
-    
+
+    total = await db.scalar(select(func.count()).select_from(models.Booking))
+    response.headers["X-Total-Count"] = str(total)
+
     results = []
     for booking in bookings:
         user_result = await db.execute(
             select(models.User).filter(models.User.UserID == booking.UserID)
         )
         user = user_result.scalars().first()
-        
-        results.append({
-            "BookingID": booking.BookingID,
-            "UserID": booking.UserID,
-            "PackageID": booking.PackageID,
-            "BookingDate": booking.BookingDate,
-            "Status": booking.Status,
-            "NumberOfPeople": booking.NumberOfPeople,
-            "UserEmail": user.Email,
-            "UserFirstName": user.FirstName,
-            "UserLastName": user.LastName
-        })
-    
-    return results
 
+        results.append(schemas.BookingInDB(
+            BookingID=booking.BookingID,
+            BookingDate=booking.BookingDate,
+            Status=booking.Status,
+            NumberOfPeople=booking.NumberOfPeople,
+            UserID=booking.UserID,
+            PackageID=booking.PackageID,
+            UserEmail=user.Email,
+            UserFirstName=user.FirstName,
+            UserLastName=user.LastName
+        ))
+
+    return results
 
 @app.get("/bookings/pending", response_model=List[schemas.BookingInDB])
 async def read_pending_bookings(skip: int = 0, limit: int = 10, db: AsyncSession = Depends(database.get_db)):
@@ -392,17 +571,18 @@ async def update_booking_status(booking_id: int, status: models.BookingStatus, d
         BookingDate=db_booking.BookingDate,
         Status=db_booking.Status,
         NumberOfPeople=db_booking.NumberOfPeople,
+        UserID=db_booking.UserID,
+        PackageID=db_booking.PackageID,
         UserEmail=user.Email,
         UserFirstName=user.FirstName,
         UserLastName=user.LastName
     )
-
-@app.delete("/bookings/{booking_id}", response_model=schemas.BookingInDB)
-async def delete_booking(booking_id: int, db: AsyncSession = Depends(database.get_db)):
-    db_booking = await crud.delete_booking(db, booking_id)
-    if db_booking is None:
-        raise HTTPException(status_code=404, detail="Booking not found")
-    return db_booking
+@app.delete("/bookings/", response_model=List[int])
+async def delete_many_bookings(delete_request: schemas.DeleteManyRequest, db: AsyncSession = Depends(database.get_db)):
+    deleted_ids = await crud.delete_many_bookings(db, delete_request.ids)
+    if not deleted_ids:
+        raise HTTPException(status_code=404, detail="No bookings found with these IDs")
+    return deleted_ids
 
 # End Of Booking Endpoints
 
@@ -447,3 +627,53 @@ async def delete_review(review_id: int, db: AsyncSession = Depends(database.get_
     return db_review
 
 # End Of Review Endpoints
+
+# Forgot Password Endpoints
+
+@app.post("/forgot-password")
+async def forgot_password(email: schemas.ForgotPassword, db: AsyncSession = Depends(database.get_db)):
+    user = await crud.get_user_email(db, email.email)
+
+    if not user:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User does not exists")
+
+    user_id = user.UserID
+
+    secret_token = crud.create_reset_password_token(email=email.email)
+    expiration_date = datetime.now(timezone.utc) + timedelta(minutes=10)
+    email_sender = os.getenv("EMAIL_SENDER")
+    email_password = os.getenv("EMAIL_PASSWORD")
+
+    password_reset_token = await crud.insert_password_reset_token(user_id, secret_token, expiration_date, db)
+    await crud.send_reset_password_email(email_sender, email_password, email.email, secret_token)
+
+    return {"success": True, "message": "Password reset link sent", "data": password_reset_token}
+
+@app.post("/reset-password", response_model=schemas.SuccessMessage)
+async def reset_password(rfp: schemas.ResetForgetPassword, db: AsyncSession = Depends(database.get_db)):
+    try:
+        info = crud.decode_reset_password_token(token=rfp.secret_token)
+
+        if info is None:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                                detail="Invalid Password Reset Payload or Reset Link Expired")
+        if rfp.new_password != rfp.confirm_password:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                                detail="New password and confirm password are not same.")
+
+        user = await crud.get_user_email(email=info, db=db)
+        if user is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+        hashed_password = crud.pwd_context.hash(rfp.new_password)
+        user_id = user.UserID
+        success = await crud.update_user_password(hashed_password, user_id, rfp.secret_token, db)
+        if success:
+            await crud.delete_reset_password_token(db, rfp.secret_token)
+            return schemas.SuccessMessage(success=True, status_code=200, message="Password reset successfully.")
+        else:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to reset password.")
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to reset password.")
+
+# End Of Forgot Password Endpoints

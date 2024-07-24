@@ -12,3 +12,10 @@ jose
 databases 
 asyncpg
 aiomysql
+google-auth
+google-auth-oauthlib
+google-auth-httplib2
+requests
+alembic
+werkzeug
+aiofiles

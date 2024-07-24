@@ -1,13 +1,16 @@
+from enum import Enum
+from fastapi import Form
 from pydantic import BaseModel, EmailStr, Field
 from typing import List, Optional
 from datetime import date, datetime
 
+from app import models
 from app.models import BookingStatus
 
 class UserBase(BaseModel):
     FirstName: str
     LastName: str
-    username: str
+    # username: Optional[str] = None
     Email: EmailStr
     Phone: str
     DateOfBirth: date
@@ -15,6 +18,7 @@ class UserBase(BaseModel):
 class UserCreate(UserBase):
     Password: str
     Role: Optional[str] = "user"
+    google_id: Optional[str] = None
 
 class UserUpdate(UserBase):
     pass
@@ -54,11 +58,16 @@ class UserRoleInDB(UserRoleBase):
     class Config:
         orm_mode = True
 
+class ImageBase(BaseModel):
+    rawFile: Optional[bytes] = Field(None, description="Raw binary data of the image file")
+    src: Optional[str] = Field(None, description="Source URL of the image")
+    title: Optional[str] = Field(None, description="Title of the image")
+
 class DestinationBase(BaseModel):
     DestinationName: str
     Country: str
     Description: Optional[str] = None
-
+    image: ImageBase = Field(..., description="Image data associated with the package")
 class DestinationCreate(DestinationBase):
     pass
 
@@ -69,33 +78,46 @@ class DestinationInDB(DestinationBase):
         orm_mode = True
 
 class PackageBase(BaseModel):
-    PackageName: str
-    Description: str
-    Price: float
-    Duration: int
-    StartDate: date
-    EndDate: date
-    DestinationID: int
+    PackageName: str = Field(..., description="Name of the package")
+    Description: Optional[str] = Field(None, description="Description of the package")
+    Price: float = Field(..., description="Price of the package")
+    Duration: int = Field(..., description="Duration of the package in days")
+    StartDate: date = Field(..., description="Start date of the package")
+    EndDate: date = Field(..., description="End date of the package")
+    DestinationID: int = Field(..., description="Identifier of the destination related to the package")
 
 class PackageCreate(PackageBase):
     pass
 
+class PackageUpdate(PackageBase):
+    pass
 class PackageInDB(PackageBase):
-    PackageID: int
-
+    PackageID: int = Field(None, description="Unique identifier of the package, automatically generated")
+    Image: Optional[ImageBase]
+    Country: Optional[str] = Field(None, description="Country of the destination")
     class Config:
         orm_mode = True
+        from_attributes = True
+class BookingsDeleteRequest(BaseModel):
+    booking_ids: List[int]
+class BookingsDeleteResponse(BaseModel):
+    message: str
+    BookingIDs: List[int]
+class BookingStatus(str, Enum):
+    CONFIRMED = "CONFIRMED"
+    PENDING = "PENDING"
+    CANCELLED = "CANCELLED"
 
 class BookingBase(BaseModel):
     UserID: int
     PackageID: int
-    Status: BookingStatus
+    Status: BookingStatus = BookingStatus.PENDING
     NumberOfPeople: int
 
 class BookingCreate(BookingBase):
     pass
 
-class BookingInDB(BaseModel):
+class BookingInDB(BookingBase):
     BookingID: int
     BookingDate: datetime
     UserEmail: Optional[str]
@@ -103,9 +125,7 @@ class BookingInDB(BaseModel):
     UserLastName: Optional[str]
 
     class Config:
-        orm_mode = True
-
-
+        orm_mode = True        
 class ReviewBase(BaseModel):
     UserID: int
     PackageID: int
@@ -144,6 +164,7 @@ class PaymentInDB(PaymentBase):
 
 class SessionTokenBase(BaseModel):
     token: str = Field(..., description="The unique token")
+    token_type: str
     session_token: str = Field(..., description="The unique session token")
 
 class SessionTokenCreate(SessionTokenBase):
@@ -183,7 +204,6 @@ class PasswordReset(PasswordResetBase):
 
     class Config:
         orm_mode = True
-
 
 class AccountActivationBase(BaseModel):
     activation_token: str = Field(..., description="The activation token sent to the user's email")
@@ -228,3 +248,10 @@ class ResetForgetPassword(BaseModel):
     secret_token: str
     new_password: str
     confirm_password: str
+
+class DeleteManyRequest(BaseModel):
+    ids: List[int] = Field(...)
+
+class LoginCredentials(BaseModel):
+    email: str
+    password: str
