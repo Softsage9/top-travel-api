@@ -255,3 +255,5 @@ class DeleteManyRequest(BaseModel):
 class LoginCredentials(BaseModel):
     email: str
     password: str
+class AuthCode(BaseModel):
+    code: str

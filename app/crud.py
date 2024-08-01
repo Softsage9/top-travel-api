@@ -217,6 +217,29 @@ async def create_user(db: AsyncSession, user: schemas.UserCreate, is_google_logi
 
     return db_user
 
+async def process_user_info(user_info, db: AsyncSession):
+    google_id = user_info['id']
+    if not google_id:
+        raise HTTPException(status_code=400, detail="Google ID is missing in the user info")
+    
+    email = user_info['email']
+    first_name = user_info.get('given_name', '')
+    last_name = user_info.get('family_name', '')
+
+    user = await get_user_by_google_id(db, google_id)
+    if not user:
+        user_data = schemas.UserCreate(
+            FirstName=first_name,
+            LastName=last_name,
+            Email=email,
+            Phone="",  # Google does not provide phone number
+            DateOfBirth=None,  # Google does not provide date of birth
+            google_id=google_id,
+            Password="",  # Password is not required for Google login
+        )
+        user = await create_user(db, user_data, is_google_login=True)
+    return user
+
 # End Of Create User Crud
 
 def generate_six_digit_code():

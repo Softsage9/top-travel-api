@@ -8,12 +8,12 @@ import uuid
 from dotenv import load_dotenv
 from fastapi import Body, Depends, FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile, logger
 from fastapi.security import OAuth2PasswordRequestForm
+import requests
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from starlette import status
-import aiofiles
 from . import crud, models, schemas, database, config
 from .database import async_session
 
@@ -42,6 +42,10 @@ load_dotenv()
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+GOOGLE_CLIENT_ID = os.getenv('GOOGLE_CLIENT_ID')
+GOOGLE_CLIENT_SECRET = os.getenv('GOOGLE_CLIENT_SECRET')
+GOOGLE_REDIRECT_URI = os.getenv('GOOGLE_REDIRECT_URI')
 
 async def init_models():
     async with database.engine.begin() as conn:
@@ -109,43 +113,36 @@ async def login_for_access_token(
         "user_id": user.UserID,
         "expiry_date": session_token.expiry_date.isoformat()
     }
+
+@app.get("/login/google")
+async def login_google():
+    return {
+        "url": f"https://accounts.google.com/o/oauth2/auth?response_type=code&client_id={GOOGLE_CLIENT_ID}&redirect_uri={GOOGLE_REDIRECT_URI}&scope=openid%20profile%20email&access_type=offline"
+    }
     
-@app.post("/auth/google", response_model=schemas.UserInDB)
-async def google_login(token: str, db: AsyncSession = Depends(database.get_db)):
-    user_info = await crud.verify_google_token(token)
+@app.get("/auth/google")
+async def auth_google(code: str, db: AsyncSession = Depends(database.get_db)):
+    token_url = "https://accounts.google.com/o/oauth2/token"
+    data = {
+        "code": code,
+        "client_id": GOOGLE_CLIENT_ID,
+        "client_secret": GOOGLE_CLIENT_SECRET,
+        "redirect_uri": GOOGLE_REDIRECT_URI,
+        "grant_type": "authorization_code",
+    }
+    response = requests.post(token_url, data=data) 
+    response.raise_for_status()
+    tokens = response.json()
+    access_token = tokens.get("access_token")
+    
+    user_info_response = requests.get("https://www.googleapis.com/oauth2/v1/userinfo", headers={"Authorization": f"Bearer {access_token}"})
+    user_info_response.raise_for_status()
+    user_info = user_info_response.json()
+    
+    # Process user info (e.g., create or update user in your database)
+    user = await crud.process_user_info(user_info, db)
 
-    existing_user = await db.execute(select(models.User).filter(models.User.Email == user_info['email']))
-    existing_user = existing_user.scalars().first()
-
-    if existing_user:
-        if not existing_user.google_id:
-            existing_user.google_id = user_info['sub']
-            await db.commit()
-            await db.refresh(existing_user)
-
-        session_token = await crud.create_google_session_token(db, existing_user.UserID, token)
-        return schemas.UserInDB(
-            **existing_user.__dict__,
-            session_token=session_token.token
-        )
-
-    new_user_data = schemas.UserCreate(
-        Email=user_info['email'],
-        Password="",
-        FirstName=user_info.get('given_name', ''),
-        LastName=user_info.get('family_name', ''),
-        Phone="",
-        DateOfBirth=None,
-        google_id=user_info['sub']
-    )
-
-    new_user = await crud.create_user(db, new_user_data, is_google_login=True)
-    session_token = await crud.create_google_session_token(db, new_user.UserID, token)
-    return schemas.UserInDB(
-        **new_user.__dict__,
-        session_token=session_token.token
-    )
-
+    return user_info
 
 @app.post("/logout", response_model=schemas.Message)
 async def logout(token: str = Query(None), google_token: str = Query(None), db: AsyncSession = Depends(database.get_db)):
