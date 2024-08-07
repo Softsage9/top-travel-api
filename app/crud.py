@@ -1,9 +1,6 @@
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from pathlib import Path
-from shutil import copyfileobj
-import shutil
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import joinedload
@@ -20,15 +17,13 @@ from email.mime.text import MIMEText
 from email_validator import validate_email, EmailNotValidError
 import asyncio
 import requests
-from fastapi import Depends, HTTPException, UploadFile
+from fastapi import Depends, HTTPException
 from jose import JWTError, jwt
 from passlib.context import CryptContext
-from sqlalchemy import and_, asc, delete, desc, func, select
+from sqlalchemy import and_, asc, desc, func, select, update
 from starlette import status
-
-from . import models, schemas, config
-
-from fastapi.security import OAuth2PasswordBearer
+import stripe
+from . import models, schemas
 from app import database
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -559,45 +554,74 @@ async def delete_many_destinations(db: AsyncSession, ids: list[int]) -> list[int
     
 
 # Package Cruds
+stripe.api_key = 'sk_test_51Pg3ZzRvSbsl0QQVQjTL7iqQQOkyGDpxZh37hbD1Y3VFeRdtYg2PLz0xq3L3IcJIv4eJWzYA35nyTviCEQq6FLud00EnnZG2bJ'
 
 async def create_package(db: AsyncSession, package: schemas.PackageCreate) -> schemas.PackageInDB:
-    # Create the package instance
-    db_package = models.Package(**package.dict())
-    db.add(db_package)
-    await db.commit()
-    await db.refresh(db_package)
+    try:
+        # Create a new product in Stripe
+        stripe_product = stripe.Product.create(
+            name=package.PackageName,
+            description=package.Description,
+        )
 
-    # Fetch the related destination information
-    destination_result = await db.execute(
-        select(models.Destination).filter(models.Destination.DestinationID == db_package.DestinationID)
-    )
-    destination = destination_result.scalars().first()
+        # Create a new price in Stripe
+        stripe_price = stripe.Price.create(
+            product=stripe_product.id,
+            unit_amount=int(package.Price * 100),  # Stripe expects amount in the smallest currency unit
+            currency="gbp",  # Ensure the currency matches your requirements
+        )
 
-    image_info = None
-    country = None
+        # Convert back to the main currency unit (GBP in this case)
+        price_amount = stripe_price.unit_amount / 100  # Convert from pence to GBP
 
-    if destination:
-        file_name = destination.src.split('\\')[-1] if destination.src else 'default.png'
-        image_info = {
-            "rawFile": destination.rawFile,
-            "src": f"http://localhost:8000/static/images/{file_name}",
-            "title": destination.title,
-        }
-        country = destination.Country
+        # Create the package instance with Stripe IDs and correct price
+        db_package = models.Package(
+            **package.dict(exclude={'Price'}),
+            Price=price_amount,
+            StripeProductID=stripe_product.id,
+            StripePriceID=stripe_price.id
+        )
+        db.add(db_package)
+        await db.commit()
+        await db.refresh(db_package)
 
-    # Return the package with the necessary additional information
-    return schemas.PackageInDB(
-        PackageID=db_package.PackageID,
-        PackageName=db_package.PackageName,
-        Description=db_package.Description,
-        Country=country,
-        Price=db_package.Price,
-        Duration=db_package.Duration,
-        StartDate=db_package.StartDate,
-        EndDate=db_package.EndDate,
-        DestinationID=db_package.DestinationID,
-        Image=image_info
-    )
+        # Fetch the related destination information
+        destination_result = await db.execute(
+            select(models.Destination).filter(models.Destination.DestinationID == db_package.DestinationID)
+        )
+        destination = destination_result.scalars().first()
+
+        image_info = None
+        country = None
+
+        if destination:
+            file_name = destination.src.split('\\')[-1] if destination.src else 'default.png'
+            image_info = {
+                "rawFile": destination.rawFile,
+                "src": f"http://localhost:8000/static/images/{file_name}",
+                "title": destination.title,
+            }
+            country = destination.Country
+
+        # Return the package with the necessary additional information
+        return schemas.PackageInDB(
+            PackageID=db_package.PackageID,
+            PackageName=db_package.PackageName,
+            Description=db_package.Description,
+            Country=country,
+            Price=db_package.Price,
+            Duration=db_package.Duration,
+            StartDate=db_package.StartDate,
+            EndDate=db_package.EndDate,
+            DestinationID=db_package.DestinationID,
+            Image=image_info,
+            StripeProductID=db_package.StripeProductID,
+            StripePriceID=db_package.StripePriceID
+        )
+
+    except stripe.error.StripeError as e:
+        raise HTTPException(status_code=400, detail=f"Stripe error: {str(e)}")
+
 
 async def get_package(db: AsyncSession, package_id: int) -> schemas.PackageInDB:
     # Fetch package by package_id
@@ -726,51 +750,73 @@ async def get_packages_by_destination_id(db: AsyncSession, destination_id: int) 
 
     return results
 
-async def update_package(db: AsyncSession, package_id: int, package_update: schemas.PackageUpdate):
+async def update_package(db: AsyncSession, package_id: int, package_update: schemas.PackageUpdate) -> schemas.PackageInDB:
     result = await db.execute(select(models.Package).filter(models.Package.PackageID == package_id))
     db_package = result.scalars().first()
-    if db_package is None:
+    if not db_package:
         raise HTTPException(status_code=404, detail=f"Package with ID {package_id} not found")
     
-    update_data = package_update.dict(exclude_unset=True)
-    for key, value in update_data.items():
-        setattr(db_package, key, value)
-    
-    await db.commit()
-    await db.refresh(db_package)
+    try:
+        # Update Stripe product details if changed
+        if package_update.PackageName or package_update.Description:
+            stripe.Product.modify(
+                db_package.StripeProductID,
+                name=package_update.PackageName or db_package.PackageName,
+                description=package_update.Description or db_package.Description,
+            )
 
-    # Fetch destination related to the package to include the Image field in the response
-    destination_result = await db.execute(
-        select(models.Destination).filter(models.Destination.DestinationID == db_package.DestinationID)
-    )
-    destination = destination_result.scalars().first()
+        # Create a new price in Stripe if the price has changed
+        if package_update.Price and package_update.Price != db_package.Price:
+            stripe_price = stripe.Price.create(
+                product=db_package.StripeProductID,
+                unit_amount=int(package_update.Price * 100),  # amount in cents
+                currency="usd",  # Adjust as needed
+            )
+            db_package.StripePriceID = stripe_price.id
 
-    image_info = None
-    country = None
+        # Update other fields in the local database
+        update_data = package_update.dict(exclude_unset=True)
+        for key, value in update_data.items():
+            setattr(db_package, key, value)
 
-    if destination:
-        file_name = destination.src.split('\\')[-1] if destination.src else 'default.png'
-        image_info = schemas.ImageBase(
-            rawFile=destination.rawFile,
-            src=f"http://localhost:8000/static/images/{file_name}",
-            title=destination.title,
+        await db.commit()
+        await db.refresh(db_package)
+
+        # Fetch destination related to the package to include the Image field in the response
+        destination_result = await db.execute(
+            select(models.Destination).filter(models.Destination.DestinationID == db_package.DestinationID)
         )
-        country = destination.Country
+        destination = destination_result.scalars().first()
 
-    response_package = schemas.PackageInDB(
-        PackageID=db_package.PackageID,
-        PackageName=db_package.PackageName,
-        Description=db_package.Description,
-        Price=db_package.Price,
-        Duration=db_package.Duration,
-        StartDate=db_package.StartDate,
-        EndDate=db_package.EndDate,
-        DestinationID=db_package.DestinationID,
-        Image=image_info,
-        Country=country
-    )
+        image_info = None
+        country = None
 
-    return response_package
+        if destination:
+            file_name = destination.src.split('\\')[-1] if destination.src else 'default.png'
+            image_info = schemas.ImageBase(
+                rawFile=destination.rawFile,
+                src=f"http://localhost:8000/static/images/{file_name}",
+                title=destination.title,
+            )
+            country = destination.Country
+
+        return schemas.PackageInDB(
+            PackageID=db_package.PackageID,
+            PackageName=db_package.PackageName,
+            Description=db_package.Description,
+            Price=db_package.Price,
+            Duration=db_package.Duration,
+            StartDate=db_package.StartDate,
+            EndDate=db_package.EndDate,
+            DestinationID=db_package.DestinationID,
+            Image=image_info,
+            Country=country,
+            StripeProductID=db_package.StripeProductID,
+            StripePriceID=db_package.StripePriceID
+        )
+
+    except stripe.error.StripeError as e:
+        raise HTTPException(status_code=400, detail=f"Stripe error: {str(e)}")
 
 
 async def delete_package(db: AsyncSession, package_id: int):
@@ -790,7 +836,20 @@ async def delete_many_packages(db: AsyncSession, ids: list[int]) -> list[int]:
         raise HTTPException(status_code=404, detail="Packages not found")
     
     for package in packages:
+        if package.StripeProductID:
+            try:
+                # Archive the Stripe product
+                stripe.Product.modify(
+                    package.StripeProductID,
+                    active=False
+                )
+            except stripe.error.StripeError as e:
+                raise HTTPException(status_code=400, detail=f"Stripe error: {str(e)}")
+        
+        # Delete the package from the database
         await db.delete(package)
+    
+    # Commit the transaction
     await db.commit()
     
     return ids
@@ -954,6 +1013,48 @@ async def get_reviews_by_package(db: AsyncSession, package_id: int, skip: int = 
     
     return avg_rating, reviews_in_db
 
+async def create_payment(db: AsyncSession, session_id: str, payment_intent_id: str, amount: int, booking_id: int):
+    payment = models.Payment(
+        BookingID=booking_id, 
+        Amount=amount,
+        PaymentMethod="card",
+        Status="created",
+        SessionID=session_id,
+        PaymentIntentID=payment_intent_id
+    )
+    db.add(payment)
+    await db.commit()
+    await db.refresh(payment)
+    return payment
+
+async def get_payment_by_session_id(db: AsyncSession, session_id: str):
+    async with db as session:
+        result = await session.execute(
+            select(models.Payment).where(models.Payment.SessionID == session_id)
+        )
+        payment_record = result.scalars().first()
+        return payment_record
+
+async def update_payment_intent_succeeded(db: AsyncSession, session_id: str, payment_intent_id: str, amount_received: float):
+    payment = await db.execute(select(models.Payment).where(models.Payment.SessionID == session_id))
+    payment = payment.scalar_one_or_none()
+    if payment:
+        payment.PaymentIntentID = payment_intent_id
+        payment.Amount = amount_received
+        payment.Status = 'completed'
+        payment.PaymentDate = datetime.utcnow()
+        await db.commit()
+
+async def update_payment(db: AsyncSession, session_id: str, payment_intent_id: str, amount: float, booking_id: str):
+    payment = await db.execute(select(models.Payment).where(models.Payment.SessionID == session_id))
+    payment = payment.scalar_one_or_none()
+    if payment:
+        payment.PaymentIntentID = payment_intent_id
+        payment.Amount = amount
+        payment.BookingID = booking_id
+        payment.Status = 'completed'
+        payment.PaymentDate = datetime.utcnow()
+        await db.commit()
 
 async def create_review(db: AsyncSession, review: schemas.ReviewCreate):
     db_review = models.Review(

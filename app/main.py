@@ -7,6 +7,7 @@ from typing import List, Optional
 import uuid
 from dotenv import load_dotenv
 from fastapi import Body, Depends, FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile, logger
+from fastapi.responses import JSONResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from starlette import status
 import aiofiles
+import stripe
 from . import crud, models, schemas, database, config
 from .database import async_session
 
@@ -42,6 +44,11 @@ load_dotenv()
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+stripe.api_key = 'sk_test_51Pg3ZzRvSbsl0QQVQjTL7iqQQOkyGDpxZh37hbD1Y3VFeRdtYg2PLz0xq3L3IcJIv4eJWzYA35nyTviCEQq6FLud00EnnZG2bJ'
+endpoint_secret = "whsec_9a4db788b53c44f596f8efdd843e6fe573fb48099f645f715bf0117ba61c0eb1" 
+
+YOUR_DOMAIN = "http://localhost:3000"
 
 async def init_models():
     async with database.engine.begin() as conn:
@@ -404,7 +411,7 @@ async def create_package(
         db: AsyncSession = Depends(database.get_db)
 ):
     logger.info("Received request to create a package")
-    
+
     package_data = schemas.PackageCreate(
         PackageName=PackageName,
         Description=Description,
@@ -416,10 +423,10 @@ async def create_package(
     )
 
     created_package = await crud.create_package(db, package_data)
-    
+
     if not created_package:
         raise HTTPException(status_code=500, detail="Failed to create the package")
-    
+
     logger.info("Package created successfully")
     return created_package
     
@@ -585,6 +592,82 @@ async def delete_many_bookings(delete_request: schemas.DeleteManyRequest, db: As
     return deleted_ids
 
 # End Of Booking Endpoints
+
+# Payment Endpoints
+
+@app.post("/create-checkout-session")
+async def create_checkout_session(request: schemas.CheckoutSessionRequest, db: AsyncSession = Depends(database.get_db)):
+    try:
+        # Create a checkout session
+        booking_id = request.booking_id
+        session = stripe.checkout.Session.create(
+            payment_method_types=['card'],
+            line_items=[{
+                'price': request.price_id,
+                'quantity': request.quantity,
+            }],
+            currency='gbp',
+            mode='payment',
+            success_url=f"{YOUR_DOMAIN}?success=true",
+            cancel_url=f"{YOUR_DOMAIN}?canceled=true",
+            metadata={'booking_id': str(booking_id)},
+            automatic_tax={'enabled': True},
+        )
+
+        logger.info(f"Complete session details: {session}")
+
+        logger.info(f"Created checkout session: {session.id}, Payment Intent: {session.payment_intent}")
+
+        # Create a payment record in the database
+        await crud.create_payment(db, session.id, session.payment_intent, session.amount_total / 100, booking_id)
+
+        return {"url": session.url}
+    
+    except Exception as e:
+        logger.error(f"Error creating checkout session: {str(e)}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/webhook")
+async def stripe_webhook(request: Request, db: AsyncSession = Depends(database.get_db)):
+    payload = await request.body()
+    sig_header = request.headers.get('stripe-signature')
+
+    event = None
+
+    try:
+        event = stripe.Webhook.construct_event(
+            payload, sig_header, endpoint_secret
+        )
+    except ValueError as e:
+        logger.error(f"Invalid payload: {e}")
+        return JSONResponse(status_code=400, content={"detail": "Invalid payload"})
+    except stripe.error.SignatureVerificationError as e:
+        logger.error(f"Invalid signature: {e}")
+        return JSONResponse(status_code=400, content={"detail": "Invalid signature"})
+    except Exception as e:
+        logger.error(f"Error verifying webhook signature: {e}")
+        return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+    # Handle the checkout.session.completed event
+    try:
+        if event['type'] == 'checkout.session.completed':
+            session = event['data']['object']
+
+            # Retrieve the payment intent
+            payment_intent_id = session.get('payment_intent')
+            booking_id = session['metadata'].get('booking_id')
+            amount_total = session['amount_total'] / 100
+
+            # Update the payment record in the database
+            await crud.update_payment(db, session.id, payment_intent_id, amount_total, booking_id)
+
+        logger.info(f"Handled event: {event['type']}")
+    except Exception as e:
+        logger.error(f"Error handling webhook event: {e}")
+        return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+
+    return JSONResponse(status_code=200, content={"detail": "Success"})
+
+# End of Payment Endpints
 
 # Review Endpoints
 
