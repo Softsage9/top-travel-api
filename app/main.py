@@ -45,10 +45,9 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-stripe.api_key = 'sk_test_51Pg3ZzRvSbsl0QQVQjTL7iqQQOkyGDpxZh37hbD1Y3VFeRdtYg2PLz0xq3L3IcJIv4eJWzYA35nyTviCEQq6FLud00EnnZG2bJ'
-endpoint_secret = "whsec_9a4db788b53c44f596f8efdd843e6fe573fb48099f645f715bf0117ba61c0eb1" 
-
-YOUR_DOMAIN = "http://localhost:3000"
+stripe.api_key = os.getenv("STRIPE_API_KEY")
+endpoint_secret = os.getenv("STRIPE_ENDPOINT_SECRET")
+YOUR_DOMAIN = os.getenv("YOUR_DOMAIN")
 
 async def init_models():
     async with database.engine.begin() as conn:
@@ -56,8 +55,10 @@ async def init_models():
 
 @app.on_event("startup")
 async def on_startup():
+    await database.check_connection()
     await init_models()
     await init_roles()
+    
 
 async def init_roles():
     async with async_session() as session:

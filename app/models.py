@@ -84,8 +84,8 @@ class Package(Base):
     StartDate = Column(Date)
     EndDate = Column(Date)
     DestinationID = Column(Integer, ForeignKey('destinations.DestinationID'))
-    StripeProductID = Column(String(255))
-    StripePriceID = Column(String(255))
+    StripeProductID = Column(String(255), nullable=True)
+    StripePriceID = Column(String(255), nullable=True)
 
     destination = relationship('Destination', back_populates='packages')
     bookings = relationship('Booking', back_populates='package')

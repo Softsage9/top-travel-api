@@ -622,7 +622,6 @@ async def create_package(db: AsyncSession, package: schemas.PackageCreate) -> sc
     except stripe.error.StripeError as e:
         raise HTTPException(status_code=400, detail=f"Stripe error: {str(e)}")
 
-
 async def get_package(db: AsyncSession, package_id: int) -> schemas.PackageInDB:
     # Fetch package by package_id
     result = await db.execute(select(models.Package).filter(models.Package.PackageID == package_id))
@@ -660,7 +659,9 @@ async def get_package(db: AsyncSession, package_id: int) -> schemas.PackageInDB:
         EndDate=package.EndDate,
         DestinationID=package.DestinationID,
         Image=image_info,
-        Country=country
+        Country=country,
+        StripeProductID=package.StripeProductID,
+        StripePriceID=package.StripePriceID
     )
     
     print(f"Fetched package: {response_package}")
@@ -706,7 +707,9 @@ async def get_packages(db: AsyncSession, skip: int = 0, limit: int = 10) -> List
             StartDate=package.StartDate,
             EndDate=package.EndDate,
             DestinationID=package.DestinationID,
-            Image=image_info
+            Image=image_info,
+            StripeProductID=package.StripeProductID,
+            StripePriceID=package.StripePriceID 
         ))
 
     return results, total
@@ -745,7 +748,9 @@ async def get_packages_by_destination_id(db: AsyncSession, destination_id: int) 
             StartDate=package.StartDate,
             EndDate=package.EndDate,
             DestinationID=package.DestinationID,
-            Image=image_info
+            Image=image_info,
+            StripeProductID=package.StripeProductID,
+            StripePriceID=package.StripePriceID 
         ))
 
     return results
