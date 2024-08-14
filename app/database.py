@@ -1,18 +1,25 @@
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
 from dotenv import load_dotenv
 import os
+import ssl
 import asyncio
 
 load_dotenv()
 
 SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL")
 
+cert_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../ca-certificate.crt'))
+
+ssl_context = ssl.create_default_context(cafile=cert_path)
+
 engine = create_async_engine(
     SQLALCHEMY_DATABASE_URL, 
     echo=True,
+    connect_args={'ssl': ssl_context},
     pool_pre_ping=True,
     pool_recycle=1800, 
     pool_size=10,
@@ -36,10 +43,12 @@ async def get_db():
 async def check_connection():
     try:
         async with engine.connect() as conn:
-            await conn.execute("SELECT 1")
-        print("Connection is OK!")
+            result = await conn.execute(text("SELECT DATABASE()"))
+            db_name = result.fetchone()
+            print(f"Connected to database: {db_name[0]}")
     except Exception as e:
-        print("Error connecting to the database:", e)
+        print(f"Error connecting to the database: {e}")
+
 
 # Run the connection check
 if __name__ == "__main__":
