@@ -277,14 +277,18 @@ async def send_verification_email(email_sender, email_password, email_receiver, 
     smtp_server = "smtp.gmail.com"
     smtp_port = 465
 
-    message = MIMEMultipart()
+
+    message = MIMEMultipart('alternative')
     message["From"] = email_sender
     message["To"] = email_receiver
     message["Subject"] = "Verify Your Email Address - Top Travel"
-    body = f"""
+
+    # Define the plain text version of the email
+    text = f"""
     Dear Customer,
 
-    Welcome to Top Travel! Thank you for choosing us for your travel needs. Please use the following verification code to activate your account:
+    Welcome to Top Travel! Thank you for choosing us for your travel needs. Please use the following verification code to activate your account: 
+    http://localhost:3000/activate-account?code={code}
 
     Verification Code: {code}
 
@@ -295,7 +299,30 @@ async def send_verification_email(email_sender, email_password, email_receiver, 
     Best regards,
     The Top Travel Team
     """
-    message.attach(MIMEText(body, 'plain'))
+
+    # Define the HTML version of the email
+    html = f"""
+    <html>
+    <body>
+        <p>Dear Customer,</p>
+        <p>Welcome to <strong>Top Travel</strong>! Thank you for choosing us for your travel needs.</p>
+        <p>Please use the following verification code to activate your account:</p>
+        <p><a href="http://localhost:3000/activate-account?code={code}">Activate Account</a></p>
+        <p>Verification Code: {code} </p>
+        <p>This code will expire in 24 hours.</p>
+        <p>If you did not request this, please ignore this email.</p>
+        <p>Best regards,<br>The Top Travel Team</p>
+    </body>
+    </html>
+    """
+
+    # Create MIMEText objects for the plain text and HTML parts
+    part1 = MIMEText(text, 'plain')
+    part2 = MIMEText(html, 'html')
+
+    # Attach both parts to the MIMEMultipart message
+    message.attach(part1)
+    message.attach(part2)
 
     def send_email():
         try:
@@ -308,7 +335,7 @@ async def send_verification_email(email_sender, email_password, email_receiver, 
             print(f"Failed to send verification email: {e}")
 
     try:
-        validate_email(email_receiver)  # Validate email format
+        validate_email(email_receiver)  # This throws EmailNotValidError if invalid
         print(f"Email {email_receiver} is valid")
         await asyncio.to_thread(send_email)  # Run blocking function in a separate thread
     except EmailNotValidError as e:

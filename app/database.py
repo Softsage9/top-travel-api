@@ -41,7 +41,7 @@ async def get_db():
 
 # Optional function to check the connection asynchronously
 async def check_connection():
-    try:
+    try: 
         async with engine.connect() as conn:
             result = await conn.execute(text("SELECT DATABASE()"))
             db_name = result.fetchone()
