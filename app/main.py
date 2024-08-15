@@ -16,6 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette import status
 import aiofiles
 import stripe
+import stripe
 from . import crud, models, schemas, database, config
 from .database import async_session
 
@@ -49,9 +50,6 @@ stripe.api_key = os.getenv("STRIPE_API_KEY")
 endpoint_secret = os.getenv("STRIPE_ENDPOINT_SECRET")
 YOUR_DOMAIN = os.getenv("YOUR_DOMAIN")
 
-if not stripe.api_key:
-    raise ValueError("Stripe API key is not set")
-
 async def init_models():
     async with database.engine.begin() as conn:
         await conn.run_sync(models.Base.metadata.create_all)
@@ -59,8 +57,10 @@ async def init_models():
 @app.on_event("startup")
 async def on_startup():
     await database.check_connection()
+    await database.check_connection()
     await init_models()
     await init_roles()
+    
     
 
 async def init_roles():
