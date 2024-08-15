@@ -1032,6 +1032,12 @@ async def create_payment(db: AsyncSession, session_id: str, payment_intent_id: s
     await db.refresh(payment)
     return payment
 
+async def get_payments(db: AsyncSession, skip: int = 0, limit: int = 10):
+    result = await db.execute(select(models.Payment).offset(skip).limit(limit))
+    payments = result.scalars().all()
+    total = await db.scalar(select(func.count()).select_from(models.Payment))
+    return payments, total
+
 async def get_payment_by_session_id(db: AsyncSession, session_id: str):
     async with db as session:
         result = await session.execute(
