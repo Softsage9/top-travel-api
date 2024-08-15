@@ -617,7 +617,7 @@ async def create_checkout_session(request: schemas.CheckoutSessionRequest, db: A
 
         logger.info(f"Complete session details: {session}")
 
-        logger.info(f"Created checkout session: {session.id}, Payment Intent: {session.payment_intent}")
+        logger.info(f"Created checkout Session: {session.id}, Payment Intent: {session.payment_intent}")
 
         # Create a payment record in the database
         await crud.create_payment(db, session.id, session.payment_intent, session.amount_total / 100, booking_id)
