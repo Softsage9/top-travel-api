@@ -86,8 +86,8 @@ class PackageBase(BaseModel):
     StartDate: date = Field(..., description="Start date of the package")
     EndDate: date = Field(..., description="End date of the package")
     DestinationID: int = Field(..., description="Identifier of the destination related to the package")
-    StripeProductID: Optional[str] = Field(..., description="Id of the package related to Stripe product")
-    StripePriceID: Optional[str] = Field(..., description="Id of the price related to Stripe product")
+    StripeProductID: Optional[str] = Field(None, description="ID of the package related to Stripe product")
+    StripePriceID: Optional[str] = Field(None, description="ID of the price related to Stripe product")
 class PackageCreate(PackageBase):
     pass
 
@@ -164,6 +164,10 @@ class PaymentInDB(PaymentBase):
 
     class Config:
         orm_mode = True
+
+class PaymentResponse(BaseModel):
+    payments: List[PaymentInDB]
+    total: int
 class CheckoutSessionRequest(BaseModel):
     package_id: int
     booking_id: int

@@ -31,6 +31,7 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 load_dotenv()
 
+stripe.api_key = os.getenv("STRIPE_API_KEY")
 SECRET_KEY = os.getenv("SECRET_KEY")
 ALGORITHM = os.getenv("ALGORITHM", "HS256")
 
@@ -349,6 +350,41 @@ async def send_reset_password_email(email_sender, email_password, email_receiver
         await asyncio.to_thread(send_email)  
     except EmailNotValidError as e:
         print(f"Invalid email address: {e}")       
+
+async def send_booking_email(email_sender, email_password, email_receiver):
+    smtp_server = "smtp.gmail.com"
+    smtp_port = 465
+
+    message = MIMEMultipart()
+    message["From"] = email_sender
+    message["To"] = email_receiver
+    message["Subject"] = "Your Booking Has Been Accepted - Top Travel"
+    body = f"""
+    Dear Customer,
+
+    Welcome to Top Travel! Thank you for choosing us for your travel needs. Your booking request has been successfully confirmed. This is an automated E-mail do not anwer to this!
+
+    Best regards,
+    The Top Travel Team
+    """
+    message.attach(MIMEText(body, 'plain'))
+
+    def send_email():
+        try:
+            smtp_obj = smtplib.SMTP_SSL(smtp_server, smtp_port)
+            smtp_obj.login(email_sender, email_password)
+            smtp_obj.send_message(message)
+            smtp_obj.quit()
+            print('Email sent successfully.')
+        except Exception as e:
+            print(f"Failed to send verification email: {e}")
+
+    try:
+        validate_email(email_receiver)  # Validate email format
+        print(f"Email {email_receiver} is valid")
+        await asyncio.to_thread(send_email)  # Run blocking function in a separate thread
+    except EmailNotValidError as e:
+        print(f"Invalid email address: {e}")
         
 # End Of Send Email Verification
 
@@ -554,7 +590,6 @@ async def delete_many_destinations(db: AsyncSession, ids: list[int]) -> list[int
     
 
 # Package Cruds
-stripe.api_key = 'sk_test_51Pg3ZzRvSbsl0QQVQjTL7iqQQOkyGDpxZh37hbD1Y3VFeRdtYg2PLz0xq3L3IcJIv4eJWzYA35nyTviCEQq6FLud00EnnZG2bJ'
 
 async def create_package(db: AsyncSession, package: schemas.PackageCreate) -> schemas.PackageInDB:
     try:
@@ -573,14 +608,20 @@ async def create_package(db: AsyncSession, package: schemas.PackageCreate) -> sc
 
         # Convert back to the main currency unit (GBP in this case)
         price_amount = stripe_price.unit_amount / 100  # Convert from pence to GBP
+        
+        print("Package data:", package.dict())
+        print("Stripe Product ID:", stripe_product.id)
+        print("Stripe Price ID:", stripe_price.id)
+
 
         # Create the package instance with Stripe IDs and correct price
         db_package = models.Package(
-            **package.dict(exclude={'Price'}),
+            **package.dict(exclude={'Price', 'StripeProductID', 'StripePriceID'}),
             Price=price_amount,
             StripeProductID=stripe_product.id,
             StripePriceID=stripe_price.id
         )
+
         db.add(db_package)
         await db.commit()
         await db.refresh(db_package)
@@ -1032,11 +1073,30 @@ async def create_payment(db: AsyncSession, session_id: str, payment_intent_id: s
     await db.refresh(payment)
     return payment
 
-async def get_payments(db: AsyncSession, skip: int = 0, limit: int = 10):
-    result = await db.execute(select(models.Payment).offset(skip).limit(limit))
-    payments = result.scalars().all()
-    total = await db.scalar(select(func.count()).select_from(models.Payment))
-    return payments, total
+async def get_payments(db: AsyncSession,
+        page: int = 0,
+        limit: int = 10,
+        sort: str = "PaymentID",
+        order: str = "asc",):
+    try:
+        sort_field = getattr(models.Payment, sort)
+        order_by = asc(sort_field) if order == "asc" else desc(sort_field)
+        
+        result = await db.execute(
+            select(models.Payment)
+            .order_by(order_by)
+            .offset(page * limit)
+            .limit(limit)
+        )
+        
+        payments = result.scalars().all()
+        payment_data = []
+        
+        return payments
+    except AttributeError:
+        raise ValueError(f"Invalid sort field: {sort}")
+    except Exception as e:
+        raise RuntimeError(f"Error querying the database: {e}")
 
 async def get_payment_by_session_id(db: AsyncSession, session_id: str):
     async with db as session:

@@ -49,6 +49,9 @@ stripe.api_key = os.getenv("STRIPE_API_KEY")
 endpoint_secret = os.getenv("STRIPE_ENDPOINT_SECRET")
 YOUR_DOMAIN = os.getenv("YOUR_DOMAIN")
 
+if not stripe.api_key:
+    raise ValueError("Stripe API key is not set")
+
 async def init_models():
     async with database.engine.begin() as conn:
         await conn.run_sync(models.Base.metadata.create_all)
@@ -573,6 +576,14 @@ async def update_booking_status(booking_id: int, status: models.BookingStatus, d
 
     if user is None:
         raise HTTPException(status_code=404, detail="User not found")
+    
+    if status == models.BookingStatus.CONFIRMED:
+        email_sender = os.getenv("EMAIL_SENDER")
+        email_password = os.getenv("EMAIL_PASSWORD")
+        try:
+            await crud.send_booking_email(email_sender, email_password, user.Email)
+        except Exception as e:
+            logging.error(f"Failed to send confirmation email: {str(e)}")
 
     return schemas.BookingInDB(
         BookingID=db_booking.BookingID,
@@ -668,10 +679,26 @@ async def stripe_webhook(request: Request, db: AsyncSession = Depends(database.g
 
     return JSONResponse(status_code=200, content={"detail": "Success"})
 
+
 @app.get("/payments/", response_model=List[schemas.PaymentInDB])
-async def read_reviews(skip: int = 0, limit: int = 10, db: AsyncSession = Depends(database.get_db)):
-    reviews = await crud.get_payments(db, skip=skip, limit=limit)
-    return reviews
+async def read_payments(response: Response,  # Include the Response object here (non-default argument)
+    skip: int = 0, 
+    limit: int = 10, 
+    _sort: str = "PaymentID", 
+    _order: str = "asc", 
+    db: AsyncSession = Depends(database.get_db)):
+    try:
+        payments = await crud.get_payments(db, page=skip // limit, limit=limit, sort=_sort, order=_order)
+        total = await db.scalar(select(func.count()).select_from(models.User))
+        response.headers["X-Total-Count"] = str(total)
+        return payments
+    
+    except ValueError as ve:
+        logging.error(f"Invalid sort field: {_sort}")
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        logging.error(f"Error fetching users: {e}")
+        raise HTTPException(status_code=500, detail="Internal Server Error")
 
 # End of Payment Endpints
 
