@@ -668,6 +668,11 @@ async def stripe_webhook(request: Request, db: AsyncSession = Depends(database.g
 
     return JSONResponse(status_code=200, content={"detail": "Success"})
 
+@app.get("/payments/", response_model=List[schemas.PaymentInDB])
+async def read_reviews(skip: int = 0, limit: int = 10, db: AsyncSession = Depends(database.get_db)):
+    reviews = await crud.get_payments(db, skip=skip, limit=limit)
+    return reviews
+
 # End of Payment Endpints
 
 # Review Endpoints
