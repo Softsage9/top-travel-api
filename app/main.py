@@ -7,6 +7,7 @@ from typing import List, Optional
 import uuid
 from dotenv import load_dotenv
 from fastapi import Body, Depends, FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile, logger
+from fastapi.responses import JSONResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from starlette import status
 import aiofiles
+import stripe
 import stripe
 from . import crud, models, schemas, database, config
 from .database import async_session
@@ -55,8 +57,10 @@ async def init_models():
 @app.on_event("startup")
 async def on_startup():
     await database.check_connection()
+    await database.check_connection()
     await init_models()
     await init_roles()
+    
     
 
 async def init_roles():
@@ -411,7 +415,7 @@ async def create_package(
         db: AsyncSession = Depends(database.get_db)
 ):
     logger.info("Received request to create a package")
-    
+
     package_data = schemas.PackageCreate(
         PackageName=PackageName,
         Description=Description,
@@ -423,10 +427,10 @@ async def create_package(
     )
 
     created_package = await crud.create_package(db, package_data)
-    
+
     if not created_package:
         raise HTTPException(status_code=500, detail="Failed to create the package")
-    
+
     logger.info("Package created successfully")
     return created_package
     
@@ -572,6 +576,14 @@ async def update_booking_status(booking_id: int, status: models.BookingStatus, d
 
     if user is None:
         raise HTTPException(status_code=404, detail="User not found")
+    
+    if status == models.BookingStatus.CONFIRMED:
+        email_sender = os.getenv("EMAIL_SENDER")
+        email_password = os.getenv("EMAIL_PASSWORD")
+        try:
+            await crud.send_booking_email(email_sender, email_password, user.Email)
+        except Exception as e:
+            logging.error(f"Failed to send confirmation email: {str(e)}")
 
     return schemas.BookingInDB(
         BookingID=db_booking.BookingID,
@@ -592,6 +604,103 @@ async def delete_many_bookings(delete_request: schemas.DeleteManyRequest, db: As
     return deleted_ids
 
 # End Of Booking Endpoints
+
+# Payment Endpoints
+
+@app.post("/create-checkout-session")
+async def create_checkout_session(request: schemas.CheckoutSessionRequest, db: AsyncSession = Depends(database.get_db)):
+    try:
+        # Create a checkout session
+        booking_id = request.booking_id
+        session = stripe.checkout.Session.create(
+            payment_method_types=['card'],
+            line_items=[{
+                'price': request.price_id,
+                'quantity': request.quantity,
+            }],
+            currency='gbp',
+            mode='payment',
+            success_url=f"{YOUR_DOMAIN}?success=true",
+            cancel_url=f"{YOUR_DOMAIN}?canceled=true",
+            metadata={'booking_id': str(booking_id)},
+            automatic_tax={'enabled': True},
+        )
+
+        logger.info(f"Complete session details: {session}")
+
+        logger.info(f"Created checkout Session: {session.id}, Payment Intent: {session.payment_intent}")
+
+        # Create a payment record in the database
+        await crud.create_payment(db, session.id, session.payment_intent, session.amount_total / 100, booking_id)
+
+        return {"url": session.url}
+    
+    except Exception as e:
+        logger.error(f"Error creating checkout session: {str(e)}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/webhook")
+async def stripe_webhook(request: Request, db: AsyncSession = Depends(database.get_db)):
+    payload = await request.body()
+    sig_header = request.headers.get('stripe-signature')
+
+    event = None
+
+    try:
+        event = stripe.Webhook.construct_event(
+            payload, sig_header, endpoint_secret
+        )
+    except ValueError as e:
+        logger.error(f"Invalid payload: {e}")
+        return JSONResponse(status_code=400, content={"detail": "Invalid payload"})
+    except stripe.error.SignatureVerificationError as e:
+        logger.error(f"Invalid signature: {e}")
+        return JSONResponse(status_code=400, content={"detail": "Invalid signature"})
+    except Exception as e:
+        logger.error(f"Error verifying webhook signature: {e}")
+        return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+    # Handle the checkout.session.completed event
+    try:
+        if event['type'] == 'checkout.session.completed':
+            session = event['data']['object']
+
+            # Retrieve the payment intent
+            payment_intent_id = session.get('payment_intent')
+            booking_id = session['metadata'].get('booking_id')
+            amount_total = session['amount_total'] / 100
+
+            # Update the payment record in the database
+            await crud.update_payment(db, session.id, payment_intent_id, amount_total, booking_id)
+
+        logger.info(f"Handled event: {event['type']}")
+    except Exception as e:
+        logger.error(f"Error handling webhook event: {e}")
+        return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+
+    return JSONResponse(status_code=200, content={"detail": "Success"})
+
+
+@app.get("/payments/", response_model=List[schemas.PaymentInDB])
+async def read_payments(response: Response,  # Include the Response object here (non-default argument)
+    skip: int = 0, 
+    limit: int = 10, 
+    _sort: str = "PaymentID", 
+    _order: str = "asc", 
+    db: AsyncSession = Depends(database.get_db)):
+    try:
+        payments = await crud.get_payments(db, page=skip // limit, limit=limit, sort=_sort, order=_order)
+        total = await db.scalar(select(func.count()).select_from(models.User))
+        response.headers["X-Total-Count"] = str(total)
+        return payments
+    
+    except ValueError as ve:
+        logging.error(f"Invalid sort field: {_sort}")
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        logging.error(f"Error fetching users: {e}")
+        raise HTTPException(status_code=500, detail="Internal Server Error")
+
+# End of Payment Endpints
 
 # Review Endpoints
 

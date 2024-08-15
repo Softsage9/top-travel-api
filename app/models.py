@@ -84,15 +84,16 @@ class Package(Base):
     StartDate = Column(Date)
     EndDate = Column(Date)
     DestinationID = Column(Integer, ForeignKey('destinations.DestinationID'))
+    StripeProductID = Column(String(255), nullable=True)
+    StripePriceID = Column(String(255), nullable=True)
+
     destination = relationship('Destination', back_populates='packages')
     bookings = relationship('Booking', back_populates='package')
     reviews = relationship('Review', back_populates='package')
-
 class BookingStatus(str, Enum):
     CONFIRMED = "CONFIRMED"
     PENDING = "PENDING"
     CANCELLED = "CANCELLED"
-
 class Booking(Base):
     __tablename__ = 'bookings'
     BookingID = Column(Integer, primary_key=True, autoincrement=True)
@@ -114,7 +115,6 @@ class Review(Base):
     ReviewDate = Column(TIMESTAMP, server_default=func.now())
     user = relationship('User', back_populates='reviews')
     package = relationship('Package', back_populates='reviews')
-
 class Payment(Base):
     __tablename__ = 'payments'
     PaymentID = Column(Integer, primary_key=True, autoincrement=True)
@@ -123,4 +123,6 @@ class Payment(Base):
     Amount = Column(DECIMAL(10, 2))
     PaymentMethod = Column(String(50))
     Status = Column(String(50))
+    SessionID = Column(String(255), unique=True, index=True)
+    PaymentIntentID = Column(String(255), unique=True, index=True)
     booking = relationship('Booking', back_populates='payment')

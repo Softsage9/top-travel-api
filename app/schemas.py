@@ -1,3 +1,4 @@
+from decimal import Decimal
 from enum import Enum
 from fastapi import Form
 from pydantic import BaseModel, EmailStr, Field
@@ -85,7 +86,8 @@ class PackageBase(BaseModel):
     StartDate: date = Field(..., description="Start date of the package")
     EndDate: date = Field(..., description="End date of the package")
     DestinationID: int = Field(..., description="Identifier of the destination related to the package")
-
+    StripeProductID: Optional[str] = Field(None, description="ID of the package related to Stripe product")
+    StripePriceID: Optional[str] = Field(None, description="ID of the price related to Stripe product")
 class PackageCreate(PackageBase):
     pass
 
@@ -98,6 +100,7 @@ class PackageInDB(PackageBase):
     class Config:
         orm_mode = True
         from_attributes = True
+
 class BookingsDeleteRequest(BaseModel):
     booking_ids: List[int]
 class BookingsDeleteResponse(BaseModel):
@@ -145,13 +148,13 @@ class ReviewInDB(ReviewBase):
 class PackageReviews(BaseModel):
     average_rating: float
     reviews: List[ReviewInDB]
-
 class PaymentBase(BaseModel):
     BookingID: int
     Amount: float
     PaymentMethod: str
     Status: str
-
+    SessionID: str
+    PaymentIntentID: Optional[str] = None
 class PaymentCreate(PaymentBase):
     pass
 
@@ -162,6 +165,14 @@ class PaymentInDB(PaymentBase):
     class Config:
         orm_mode = True
 
+class PaymentResponse(BaseModel):
+    payments: List[PaymentInDB]
+    total: int
+class CheckoutSessionRequest(BaseModel):
+    package_id: int
+    booking_id: int
+    price_id: str
+    quantity: int
 class SessionTokenBase(BaseModel):
     token: str = Field(..., description="The unique token")
     token_type: str
