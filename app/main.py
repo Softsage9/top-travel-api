@@ -620,8 +620,8 @@ async def create_checkout_session(request: schemas.CheckoutSessionRequest, db: A
             }],
             currency='gbp',
             mode='payment',
-            success_url=f"{YOUR_DOMAIN}?success=true",
-            cancel_url=f"{YOUR_DOMAIN}?canceled=true",
+            success_url=f"{YOUR_DOMAIN}/payment-success/?success=true&session_id={{CHECKOUT_SESSION_ID}}",
+            cancel_url=f"{YOUR_DOMAIN}/payment-error/?canceled=true&session_id={{CHECKOUT_SESSION_ID}}",
             metadata={'booking_id': str(booking_id)},
             automatic_tax={'enabled': True},
         )
@@ -737,7 +737,7 @@ async def update_review(review_id: int, review: schemas.ReviewCreate, db: AsyncS
 
 @app.delete("/reviews/{review_id}", response_model=schemas.ReviewInDB)
 async def delete_review(review_id: int, db: AsyncSession = Depends(database.get_db)):
-    db_review = crud.delete_review(db, review_id)
+    db_review = await crud.delete_review(db, review_id)
     if db_review is None:
         raise HTTPException(status_code=404, detail="Review not found")
     return db_review
