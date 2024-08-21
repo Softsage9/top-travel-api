@@ -1,6 +1,7 @@
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import List, Optional
+from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import joinedload
@@ -34,6 +35,9 @@ load_dotenv()
 stripe.api_key = os.getenv("STRIPE_API_KEY")
 SECRET_KEY = os.getenv("SECRET_KEY")
 ALGORITHM = os.getenv("ALGORITHM", "HS256")
+
+logging.basicConfig(level=logging.error)
+logger = logging.getLogger(__name__)
 
 # Get Users Crud
 
@@ -1153,6 +1157,75 @@ async def update_payment(db: AsyncSession, session_id: str, payment_intent_id: s
         payment.Status = 'completed'
         payment.PaymentDate = datetime.utcnow()
         await db.commit()
+
+async def handle_payment_intent_succeeded(event_data, db: AsyncSession):
+    payment_intent = event_data['object']
+    payment_intent_id = payment_intent['id']
+    amount_received = payment_intent['amount_received'] / 100  # Convert to correct currency format
+    booking_id = payment_intent['metadata'].get('booking_id')
+    
+    # Check if payment exists and update it
+    payment = await db.execute(select(models.Payment).where(models.Payment.PaymentIntentID == payment_intent_id))
+    payment = payment.scalar_one_or_none()
+    
+    if payment:
+        if payment.Status == 'completed':
+            return "Payment already processed and completed"
+    
+        payment.Amount = amount_received
+        payment.Status = 'completed'
+        payment.PaymentDate = datetime.utcnow()
+        await db.commit()
+        return "Payment updated successfully"
+    else:
+        new_payment = models.Payment(
+            PaymentIntentID=payment_intent_id,
+            Amount=amount_received,
+            BookingID=booking_id,
+            Status='completed',
+            PaymentDate=datetime.utcnow()
+        )
+        db.add(new_payment)
+        await db.commit()
+
+    return "Payment updated successfully"
+
+async def handle_payment_intent_failed(payment_intent, db: AsyncSession):
+    # Extract necessary data from the payment_intent
+    payment_intent_id = payment_intent['id']
+    error_message = payment_intent['last_payment_error']['message'] if payment_intent['last_payment_error'] else 'Unknown error'
+    booking_id = payment_intent['metadata'].get('booking_id')
+
+    # Log the failure and potentially notify the user
+    logger.error(f"Payment failed for PaymentIntent {payment_intent_id}: {error_message}")
+    # Update database to reflect payment failure
+    await mark_payment_as_failed(db, payment_intent_id, booking_id, error_message)
+    return JSONResponse(status_code=200, content={"detail": "Payment failure processed"})
+
+async def mark_payment_as_failed(db: AsyncSession, payment_intent_id: str, booking_id: str, error_message: str):
+    # Check if a payment record already exists
+    stmt = select(models.Payment).where(models.Payment.PaymentIntentID == payment_intent_id)
+    result = await db.execute(stmt)
+    payment = result.scalar_one_or_none()
+    
+    if payment:
+        payment.Status = 'failed'
+        payment.ErrorMessage = error_message
+        payment.PaymentDate = datetime.utcnow()
+    else:
+        # Create a new payment record if it does not exist
+        payment = models.Payment(
+            PaymentIntentID=payment_intent_id,
+            BookingID=booking_id,
+            Amount=0.0,
+            Status='failed',
+            ErrorMessage=error_message,
+            PaymentDate=datetime.utcnow()
+        )
+        db.add(payment)
+    
+    await db.commit()
+    return "Payment status updated to failed"
 
 async def create_review(db: AsyncSession, review: schemas.ReviewCreate):
     db_review = models.Review(

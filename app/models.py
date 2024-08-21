@@ -125,4 +125,5 @@ class Payment(Base):
     Status = Column(String(50))
     SessionID = Column(String(255), unique=True, index=True)
     PaymentIntentID = Column(String(255), unique=True, index=True)
+    ErrorMessage = Column(String(255), nullable=True)
     booking = relationship('Booking', back_populates='payment')

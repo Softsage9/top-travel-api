@@ -155,6 +155,7 @@ class PaymentBase(BaseModel):
     Status: str
     SessionID: str
     PaymentIntentID: Optional[str] = None
+    ErrorMessage: Optional[str] = None
 class PaymentCreate(PaymentBase):
     pass
 

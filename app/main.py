@@ -28,6 +28,8 @@ origins = [
     "http://localhost:5173", 
     "http://localhost:5174",
     "http://localhost:3000",
+    "https://monkfish-app-kbpsa.ondigitalocean.app",
+    "https://top-travel.uk",
 ]
 
 app.add_middleware(
@@ -663,16 +665,17 @@ async def stripe_webhook(request: Request, db: AsyncSession = Depends(database.g
     try:
         if event['type'] == 'checkout.session.completed':
             session = event['data']['object']
-
-            # Retrieve the payment intent
             payment_intent_id = session.get('payment_intent')
             booking_id = session['metadata'].get('booking_id')
             amount_total = session['amount_total'] / 100
-
-            # Update the payment record in the database
             await crud.update_payment(db, session.id, payment_intent_id, amount_total, booking_id)
 
-        logger.info(f"Handled event: {event['type']}")
+        elif event['type'] == 'payment_intent.succeeded':
+            return await crud.handle_payment_intent_succeeded(event['data'], db)
+
+        elif event['type'] == 'payment_intent.payment_failed':
+            payment_intent = event['data']['object']
+            return await crud.handle_payment_intent_failed(payment_intent, db)
     except Exception as e:
         logger.error(f"Error handling webhook event: {e}")
         return JSONResponse(status_code=500, content={"detail": "Internal server error"})
