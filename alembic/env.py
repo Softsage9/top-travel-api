@@ -3,6 +3,12 @@ from logging.config import fileConfig
 import asyncio
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from alembic import context
+from dotenv import load_dotenv
+import os
+
+load_dotenv() 
+
+DATABASE_URL = os.getenv("DATABASE_URL")
 
 target_metadata = Base.metadata
 
@@ -10,7 +16,7 @@ target_metadata = Base.metadata
 def get_db_url():
     # Ensure your database URL is appropriate for aiomysql
     # Example: mysql+aiomysql://user:password@host:port/dbname
-    return "mysql+aiomysql://doadmin:AVNS_12n4sZUw4Y8e_HtegQu@top-travel-database-do-user-15197723-0.m.db.ondigitalocean.com:25060/defaultdb"
+    return DATABASE_URL
 
 # Create an asynchronous engine instance
 connectable: AsyncEngine = create_async_engine(
