@@ -173,7 +173,6 @@ class CheckoutSessionRequest(BaseModel):
     package_id: int
     booking_id: int
     price_id: str
-    quantity: int
 class SessionTokenBase(BaseModel):
     token: str = Field(..., description="The unique token")
     token_type: str

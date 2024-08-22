@@ -36,7 +36,7 @@ stripe.api_key = os.getenv("STRIPE_API_KEY")
 SECRET_KEY = os.getenv("SECRET_KEY")
 ALGORITHM = os.getenv("ALGORITHM", "HS256")
 
-logging.basicConfig(level=logging.ERROR)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Get Users Crud
@@ -402,18 +402,21 @@ async def send_booking_email(email_sender, email_password, email_receiver):
 
     def send_email():
         try:
+            logging.info("Connecting to SMTP server")
             smtp_obj = smtplib.SMTP_SSL(smtp_server, smtp_port)
+            logging.info("Logging in to SMTP server")
             smtp_obj.login(email_sender, email_password)
+            logging.info("Sending email")
             smtp_obj.send_message(message)
             smtp_obj.quit()
-            print('Email sent successfully.')
+            logging.info("Email sent successfully.")
         except Exception as e:
-            print(f"Failed to send verification email: {e}")
+            logging.error(f"Failed to send reset password email: {e}")
 
     try:
         validate_email(email_receiver)  # Validate email format
         print(f"Email {email_receiver} is valid")
-        await asyncio.to_thread(send_email)  # Run blocking function in a separate thread
+        await asyncio.to_thread(send_email) 
     except EmailNotValidError as e:
         print(f"Invalid email address: {e}")
         
@@ -1157,6 +1160,21 @@ async def update_payment(db: AsyncSession, session_id: str, payment_intent_id: s
         payment.Status = 'completed'
         payment.PaymentDate = datetime.utcnow()
         await db.commit()
+
+async def delete_many_payments(db: AsyncSession, ids: List[int]) -> List[int]:
+    print("Fetching payments to delete:", ids)
+    result = await db.execute(select(models.Payment).filter(models.Payment.PaymentID.in_(ids)))
+    payments_to_delete = result.scalars().all()
+    
+    if not payments_to_delete:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payments not found")
+
+    for payment in payments_to_delete:
+        await db.delete(payment)
+
+    await db.commit()
+
+    return [payment.PaymentID for payment in payments_to_delete]
 
 async def handle_payment_intent_succeeded(event_data, db: AsyncSession):
     payment_intent = event_data['object']

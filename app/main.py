@@ -612,19 +612,24 @@ async def delete_many_bookings(delete_request: schemas.DeleteManyRequest, db: As
 @app.post("/create-checkout-session")
 async def create_checkout_session(request: schemas.CheckoutSessionRequest, db: AsyncSession = Depends(database.get_db)):
     try:
-        # Create a checkout session
-        booking_id = request.booking_id
+        booking = await crud.get_booking(db, request.booking_id)
+
+        if not booking:
+            raise HTTPException(status_code=404, detail="Booking not found")
+        
+        quantity = booking.NumberOfPeople
+
         session = stripe.checkout.Session.create(
             payment_method_types=['card'],
             line_items=[{
                 'price': request.price_id,
-                'quantity': request.quantity,
+                'quantity': quantity,
             }],
             currency='gbp',
             mode='payment',
             success_url=f"{YOUR_DOMAIN}/payment-success/?success=true&session_id={{CHECKOUT_SESSION_ID}}",
             cancel_url=f"{YOUR_DOMAIN}/payment-error/?canceled=true&session_id={{CHECKOUT_SESSION_ID}}",
-            metadata={'booking_id': str(booking_id)},
+            metadata={'booking_id': str(request.booking_id)},
             automatic_tax={'enabled': True},
         )
 
@@ -633,7 +638,7 @@ async def create_checkout_session(request: schemas.CheckoutSessionRequest, db: A
         logger.info(f"Created checkout Session: {session.id}, Payment Intent: {session.payment_intent}")
 
         # Create a payment record in the database
-        await crud.create_payment(db, session.id, session.payment_intent, session.amount_total / 100, booking_id)
+        await crud.create_payment(db, session.id, session.payment_intent, session.amount_total / 100, request.booking_id)
 
         return {"url": session.url}
     
@@ -670,9 +675,17 @@ async def stripe_webhook(request: Request, db: AsyncSession = Depends(database.g
             amount_total = session['amount_total'] / 100
             await crud.update_payment(db, session.id, payment_intent_id, amount_total, booking_id)
 
-        elif event['type'] == 'payment_intent.succeeded':
-            return await crud.handle_payment_intent_succeeded(event['data'], db)
+        # elif event['type'] == 'payment_intent.succeeded':
+        #     payment_intent_id = event['data']['object']['id']
 
+        #     # Check for duplicate PaymentIntentID before proceeding
+        #     existing_payment = await db.execute(select(models.Payment).filter(models.Payment.PaymentIntentID == payment_intent_id))
+        #     if existing_payment.scalars().first():
+        #         logger.info(f"PaymentIntentID {payment_intent_id} already exists, skipping insertion.")
+        #         return JSONResponse(status_code=200, content={"detail": "Duplicate PaymentIntentID, skipping insertion."})
+
+        #     return await crud.handle_payment_intent_succeeded(event['data'], db)
+        
         elif event['type'] == 'payment_intent.payment_failed':
             payment_intent = event['data']['object']
             return await crud.handle_payment_intent_failed(payment_intent, db)
@@ -702,6 +715,13 @@ async def read_payments(response: Response,  # Include the Response object here 
     except Exception as e:
         logging.error(f"Error fetching users: {e}")
         raise HTTPException(status_code=500, detail="Internal Server Error")
+    
+@app.delete("/payments/", response_model=List[int])
+async def delete_many_destinations(delete_request: schemas.DeleteManyRequest, db: AsyncSession = Depends(database.get_db)):
+    deleted_ids = await crud.delete_many_payments(db, delete_request.ids)
+    if not deleted_ids:
+        raise HTTPException(status_code=404, detail="No payments found with these IDs")
+    return deleted_ids
 
 # End of Payment Endpints
 
