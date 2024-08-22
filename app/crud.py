@@ -36,7 +36,7 @@ stripe.api_key = os.getenv("STRIPE_API_KEY")
 SECRET_KEY = os.getenv("SECRET_KEY")
 ALGORITHM = os.getenv("ALGORITHM", "HS256")
 
-logging.basicConfig(level=logging.error)
+logging.basicConfig(level=logging.ERROR)
 logger = logging.getLogger(__name__)
 
 # Get Users Crud
