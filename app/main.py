@@ -28,8 +28,8 @@ origins = [
     "http://localhost:5173", 
     "http://localhost:5174",
     "http://localhost:3000",
-    "https://monkfish-app-kbpsa.ondigitalocean.app",
     "https://top-travel.uk",
+    "https://www.top-travel.uk",
 ]
 
 app.add_middleware(
