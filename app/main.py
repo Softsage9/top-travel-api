@@ -30,12 +30,11 @@ origins = [
     "http://localhost:3000",
     "https://top-travel.uk",
     "https://www.top-travel.uk",
-    "https://api.top-travel.uk",
 ]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins
+    allow_origins=origins, 
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
