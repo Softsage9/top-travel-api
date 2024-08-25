@@ -17,6 +17,7 @@ from starlette import status
 import aiofiles
 import stripe
 import stripe
+import uvicorn
 from . import crud, models, schemas, database, config
 from .database import async_session
 
