@@ -32,7 +32,7 @@ class UserInDB(UserBase):
     is_verified: bool = False
 
     class Config:
-        orm_mode = True
+        from_attributes= True
 
 class RoleBase(BaseModel):
     RoleName: str
@@ -44,7 +44,7 @@ class RoleInDB(RoleBase):
     RoleID: int
 
     class Config:
-        orm_mode = True
+        from_attributes= True
 
 class UserRoleBase(BaseModel):
     UserID: int
@@ -57,7 +57,7 @@ class UserRoleInDB(UserRoleBase):
     UserRoleID: int
 
     class Config:
-        orm_mode = True
+        from_attributes= True
 
 class ImageBase(BaseModel):
     rawFile: Optional[bytes] = Field(None, description="Raw binary data of the image file")
@@ -76,7 +76,7 @@ class DestinationInDB(DestinationBase):
     DestinationID: int
 
     class Config:
-        orm_mode = True
+        from_attributes= True
 
 class PackageBase(BaseModel):
     PackageName: str = Field(..., description="Name of the package")
@@ -98,7 +98,7 @@ class PackageInDB(PackageBase):
     Image: Optional[ImageBase]
     Country: Optional[str] = Field(None, description="Country of the destination")
     class Config:
-        orm_mode = True
+        from_attributes= True
         from_attributes = True
 
 class BookingsDeleteRequest(BaseModel):
@@ -128,7 +128,7 @@ class BookingInDB(BookingBase):
     UserLastName: Optional[str]
 
     class Config:
-        orm_mode = True        
+        from_attributes= True        
 class ReviewBase(BaseModel):
     UserID: int
     PackageID: int
@@ -143,7 +143,7 @@ class ReviewInDB(ReviewBase):
     ReviewDate: datetime
 
     class Config:
-        orm_mode = True
+        from_attributes= True
 
 class PackageReviews(BaseModel):
     average_rating: float
@@ -164,7 +164,7 @@ class PaymentInDB(PaymentBase):
     PaymentDate: datetime
 
     class Config:
-        orm_mode = True
+        from_attributes= True
 
 class PaymentResponse(BaseModel):
     payments: List[PaymentInDB]
@@ -187,7 +187,7 @@ class SessionToken(SessionTokenBase):
     expiry_date: Optional[datetime] = Field(None, description="The expiration date of the token")
 
     class Config:
-        orm_mode = True
+        from_attributes= True
 
 
 class TokenData(BaseModel):
@@ -214,7 +214,7 @@ class PasswordReset(PasswordResetBase):
     is_used: bool = Field(False, description="If it's true the token will be deleted")
 
     class Config:
-        orm_mode = True
+        from_attributes= True
 
 class AccountActivationBase(BaseModel):
     activation_token: str = Field(..., description="The activation token sent to the user's email")
@@ -237,7 +237,7 @@ class AccountActivation(BaseModel):
     created_at: datetime
 
     class Config:
-        orm_mode = True
+        from_attributes= True
 
 
 class VerifyCodeRequest(BaseModel):

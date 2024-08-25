@@ -28,18 +28,18 @@ origins = [
     "http://localhost:5173", 
     "http://localhost:5174",
     "http://localhost:3000",
-    "https://monkfish-app-kbpsa.ondigitalocean.app",
     "https://top-travel.uk",
+    "https://www.top-travel.uk",
 ]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=origins, 
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["X-Total-Count"],
 )
+
 
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
@@ -816,3 +816,6 @@ async def reset_password(rfp: schemas.ResetForgetPassword, db: AsyncSession = De
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to reset password.")
 
 # End Of Forgot Password Endpoints
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8080)
