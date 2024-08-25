@@ -816,3 +816,6 @@ async def reset_password(rfp: schemas.ResetForgetPassword, db: AsyncSession = De
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to reset password.")
 
 # End Of Forgot Password Endpoints
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8080)
