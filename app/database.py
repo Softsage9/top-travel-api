@@ -7,19 +7,26 @@ from dotenv import load_dotenv
 import os
 import ssl
 import asyncio
+import aiomysql
 
 load_dotenv()
 
 SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL")
 
+
+ssl_context = ssl.create_default_context()
+ssl_context.check_hostname = True  # Optional, depending on your setup
+ssl_context.verify_mode = ssl.CERT_REQUIRED
+
 cert_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../ca-certificate.crt'))
 
-ssl_context = ssl.create_default_context(cafile=cert_path)
+# Path to your CA certificate
+ssl_context.load_verify_locations(cafile=cert_path)
 
 engine = create_async_engine(
     SQLALCHEMY_DATABASE_URL, 
     echo=True,
-    connect_args={'ssl': ssl_context},
+   # connect_args={'ssl': ssl_context},
     pool_pre_ping=True,
     pool_recycle=1800, 
     pool_size=10,

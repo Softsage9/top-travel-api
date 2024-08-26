@@ -673,7 +673,7 @@ async def create_package(db: AsyncSession, package: schemas.PackageCreate) -> sc
             file_name = destination.src.split('\\')[-1] if destination.src else 'default.png'
             image_info = {
                 "rawFile": destination.rawFile,
-                "src": f"http://localhost:8000/static/images/{file_name}",
+                "src": f"https://server-app-zxcxm.ondigitalocean.app/static/images/{file_name}",
                 "title": destination.title,
             }
             country = destination.Country
@@ -719,7 +719,7 @@ async def get_package(db: AsyncSession, package_id: int) -> schemas.PackageInDB:
         file_name = destination.src.split('\\')[-1] if destination.src else 'default.png'
         image_info = schemas.ImageBase(
             rawFile=destination.rawFile,
-            src=f"http://localhost:8000/static/images/{file_name}",
+            src=f"https://server-app-zxcxm.ondigitalocean.app/static/images/{file_name}",
             title=destination.title,
         )
         country = destination.Country
@@ -764,7 +764,7 @@ async def get_packages(db: AsyncSession, skip: int = 0, limit: int = 10) -> List
             file_name = destination.src.split('\\')[-1] if destination.src else 'default.png'
             image_info = {
                 "rawFile": destination.rawFile,
-                "src": f"http://localhost:8000/static/images/{file_name}",
+                "src": f"https://server-app-zxcxm.ondigitalocean.app/static/images/{file_name}",
                 "title": destination.title,
             }
             country = destination.Country
@@ -808,7 +808,7 @@ async def get_packages_by_destination_id(db: AsyncSession, destination_id: int) 
             file_name = destination.src.split('\\')[-1] if destination.src else 'default.png'
             image_info = schemas.ImageBase(
                 rawFile=destination.rawFile,
-                src=f"http://localhost:8000/static/images/{file_name}",
+                src=f"https://server-app-zxcxm.ondigitalocean.app/static/images/{file_name}",
                 title=destination.title,
             )
             country = destination.Country
@@ -875,7 +875,7 @@ async def update_package(db: AsyncSession, package_id: int, package_update: sche
             file_name = destination.src.split('\\')[-1] if destination.src else 'default.png'
             image_info = schemas.ImageBase(
                 rawFile=destination.rawFile,
-                src=f"http://localhost:8000/static/images/{file_name}",
+                src=f"https://server-app-zxcxm.ondigitalocean.app/static/images/{file_name}",
                 title=destination.title,
             )
             country = destination.Country
