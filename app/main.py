@@ -26,21 +26,21 @@ app = FastAPI()
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 origins = [
-    # "http://localhost:5173", 
-    # "http://localhost:5174",
+    "http://localhost:5173", 
+    "http://localhost:5174",
     "http://localhost:3000",
     "https://top-travel.uk",
     "https://www.top-travel.uk",
-    "https://server-app-zxcxm.ondigitalocean.app",
 ]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins, 
+    allow_origins=["*"], 
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["X-Total-Count", "X-Allow-Origin"],
+    expose_headers=["X-Total-Count"],
+
 )
 
 
