@@ -288,7 +288,7 @@ async def send_verification_email(email_sender, email_password, email_receiver, 
     Dear Customer,
 
     Welcome to Top Travel! Thank you for choosing us for your travel needs. Please use the following verification code to activate your account: 
-    http://localhost:3000/activate-account?code={code}
+    https://top-travel.uk/activate-account?code={code}
 
     Verification Code: {code}
 
@@ -307,7 +307,7 @@ async def send_verification_email(email_sender, email_password, email_receiver, 
         <p>Dear Customer,</p>
         <p>Welcome to <strong>Top Travel</strong>! Thank you for choosing us for your travel needs.</p>
         <p>Please use the following verification code to activate your account:</p>
-        <p><a href="http://localhost:3000/activate-account?code={code}">Activate Account</a></p>
+        <p><a href="https://top-travel.uk/activate-account?code={code}">Activate Account</a></p>
         <p>Verification Code: {code} </p>
         <p>This code will expire in 24 hours.</p>
         <p>If you did not request this, please ignore this email.</p>
@@ -355,7 +355,7 @@ async def send_reset_password_email(email_sender, email_password, email_receiver
     We received a request to reset your password for your Top Travel account. Please use the following reset code to change your password:
 
     You can reset your password using the following link:
-    http://localhost:3000/reset-password?secret_token={reset_code}
+    https://top-travel.uk/reset-password?secret_token={reset_code}
 
     This code will expire in 24 hours.
 

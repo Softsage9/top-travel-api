@@ -40,7 +40,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
     expose_headers=["X-Total-Count"],
-
 )
 
 
@@ -237,7 +236,6 @@ async def create_user_endpoint(user: schemas.UserCreate, db: AsyncSession = Depe
         raise HTTPException(status_code=500, detail=str(e))
 
     return new_user
-
 
 # End Of Create User Endpoint
 
