@@ -21,7 +21,7 @@ import requests
 from fastapi import Depends, HTTPException
 from jose import JWTError, jwt
 from passlib.context import CryptContext
-from sqlalchemy import and_, asc, desc, func, select, update
+from sqlalchemy import and_, asc, desc, func, select, text, update
 from starlette import status
 import stripe
 from . import models, schemas
@@ -167,6 +167,11 @@ async def create_access_token(data: dict, db: AsyncSession, user_id: int, expire
 
     return encoded_jwt, session_token
 
+async def invalidate_existing_sessions(user_id: int, db: AsyncSession):
+    # Correctly prepare and execute a raw SQL statement using `text()`
+    sql = text("DELETE FROM session_tokens WHERE user_id = :user_id")
+    await db.execute(sql, {"user_id": user_id})
+    await db.commit()
 
 async def create_google_session_token(db: AsyncSession, user_id: int, google_access_token: str,
                                 expires_delta: timedelta or None = None):

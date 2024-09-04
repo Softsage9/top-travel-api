@@ -110,6 +110,8 @@ async def login_for_access_token(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Account is not verified.",
         )
+    
+    await crud.invalidate_existing_sessions(user.UserID, db)
 
     # Generate JWT token and session token
     jwt_token, session_token = await crud.create_access_token(
