@@ -34,8 +34,8 @@ app.add_middleware(
         "https://www.top-travel.uk"
     ],
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
+    allow_headers=["Content-Type", "Authorization", "X-Total-Count"],
     expose_headers=["Content-Range", "X-Total-Count"],
 )
 
