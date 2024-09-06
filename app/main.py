@@ -25,16 +25,14 @@ app = FastAPI()
 
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
-origins = [
-    "http://localhost:5173", 
-    "http://localhost:3000",
-    "https://top-travel.uk",
-    "https://www.top-travel.uk",
-]
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins, 
+    allow_origins=[
+        "http://localhost:5173",
+        "http://localhost:3000",
+        "https://top-travel.uk",
+        "https://www.top-travel.uk"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
