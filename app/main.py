@@ -25,17 +25,19 @@ app = FastAPI()
 
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
-CORS_ALLOW_ORIGINS = os.getenv("CORS_ALLOW_ORIGINS", "").split(",")
+CORS_ALLOW_ORIGINS = [origin.strip() for origin in os.getenv("CORS_ALLOW_ORIGINS", "").split(",")]
+CORS_ALLOW_METHODS = os.getenv("CORS_ALLOW_METHODS", "").split(",")
+CORS_ALLOW_HEADERS = os.getenv("CORS_ALLOW_HEADER", "").split(",")
+CORS_EXPOSE_HEADERS = os.getenv("CORS_EXPOSE_HEADERS", "").split(",")
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ALLOW_ORIGINS,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE"],
-    allow_headers=["Content-Type", "Authorization", "X-Total-Count"],
-    expose_headers=["Content-Range", "X-Total-Count"],
+    allow_methods=CORS_ALLOW_METHODS,
+    allow_headers=CORS_ALLOW_HEADERS,
+    expose_headers=CORS_EXPOSE_HEADERS,
 )
-
 
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
@@ -58,8 +60,7 @@ async def on_startup():
     await database.check_connection()
     await init_models()
     await init_roles()
-    
-    
+    print("Allowed CORS Origins: ", CORS_ALLOW_ORIGINS)
 
 async def init_roles():
     async with async_session() as session:
