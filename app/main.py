@@ -55,7 +55,6 @@ async def on_startup():
     await database.check_connection()
     await init_models()
     await init_roles()
-    print("Allowed CORS Origins: ", CORS_ALLOW_ORIGINS)
 
 async def init_roles():
     async with async_session() as session:
