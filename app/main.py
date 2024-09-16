@@ -14,7 +14,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from starlette import status
-import aiofiles
 import stripe
 import stripe
 import uvicorn
