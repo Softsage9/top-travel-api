@@ -26,7 +26,7 @@ app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 CORS_ALLOW_ORIGINS = [origin.strip() for origin in os.getenv("CORS_ALLOW_ORIGINS", "").split(",")]
 CORS_ALLOW_METHODS = os.getenv("CORS_ALLOW_METHODS", "").split(",")
-CORS_ALLOW_HEADERS = os.getenv("CORS_ALLOW_HEADER", "").split(",")
+CORS_ALLOW_HEADERS = os.getenv("CORS_ALLOW_HEADERS", "").split(",")
 CORS_EXPOSE_HEADERS = os.getenv("CORS_EXPOSE_HEADERS", "").split(",")
 
 app.add_middleware(
