@@ -15,7 +15,6 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from starlette import status
 import stripe
-import stripe
 import uvicorn
 from . import crud, models, schemas, database, config
 from .database import async_session
@@ -24,10 +23,10 @@ app = FastAPI()
 
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
-CORS_ALLOW_ORIGINS = [origin.strip() for origin in os.getenv("CORS_ALLOW_ORIGINS", "").split(",")]
-CORS_ALLOW_METHODS = os.getenv("CORS_ALLOW_METHODS", "").split(",")
-CORS_ALLOW_HEADERS = os.getenv("CORS_ALLOW_HEADERS", "").split(",")
-CORS_EXPOSE_HEADERS = os.getenv("CORS_EXPOSE_HEADERS", "").split(",")
+CORS_ALLOW_ORIGINS = ["*"]
+CORS_ALLOW_METHODS = ["GET", "POST", "PUT", "DELETE"]
+CORS_ALLOW_HEADERS = ["Content-Type", "Authorization", "X-Total-Count"]
+CORS_EXPOSE_HEADERS = ["X-Total-Count", "Content-Range"]
 
 app.add_middleware(
     CORSMiddleware,
