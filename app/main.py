@@ -24,7 +24,7 @@ app = FastAPI()
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 CORS_ALLOW_ORIGINS = ["*"]
-CORS_ALLOW_METHODS = ["GET", "POST", "PUT", "DELETE"]
+CORS_ALLOW_METHODS = ["*"]
 CORS_ALLOW_HEADERS = ["Content-Type", "Authorization", "X-Total-Count"]
 CORS_EXPOSE_HEADERS = ["X-Total-Count", "Content-Range"]
 
