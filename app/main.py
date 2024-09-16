@@ -23,20 +23,17 @@ app = FastAPI()
 
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
-CORS_ALLOW_ORIGINS = ["*"]
-CORS_ALLOW_METHODS = ["*"]
 CORS_ALLOW_HEADERS = ["Content-Type", "Authorization", "X-Total-Count"]
 CORS_EXPOSE_HEADERS = ["X-Total-Count", "Content-Range"]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=CORS_ALLOW_ORIGINS,
+    allow_origins=["*"],  # Allows all origins
     allow_credentials=True,
-    allow_methods=CORS_ALLOW_METHODS,
-    allow_headers=CORS_ALLOW_HEADERS,
-    expose_headers=CORS_EXPOSE_HEADERS,
+    allow_methods=["*"],  # Allows all methods
+    allow_headers=["Content-Type", "Authorization", "X-Total-Count"],
+    expose_headers=["X-Total-Count", "Content-Range"]
 )
-
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
 load_dotenv()
