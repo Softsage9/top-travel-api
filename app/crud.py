@@ -89,6 +89,19 @@ async def delete_user(db: AsyncSession, user_id: int):
     await db.commit()
     return user
 
+async def delete_many_users(db: AsyncSession, ids: list[int]) -> list[int]:
+    query = select(models.User).where(models.User.UserID.in_(ids))
+    result = await db.execute(query)
+    users = result.scalars().all()
+    if not users:
+        raise HTTPException(status_code=404, detail="Users not found")
+    
+    for user in users:
+        await db.delete(user)
+    await db.commit()
+    
+    return ids
+
 async def get_user_by_google_id(db: AsyncSession, google_id: str):
     result = await db.execute(select(models.User).filter(models.User.google_id == google_id))
     return result.scalars().first()

@@ -271,6 +271,13 @@ async def delete_user(user_id: int, db: AsyncSession = Depends(database.get_db))
         raise HTTPException(status_code=404, detail="User not found")
     return db_event
 
+@app.delete("/users/", response_model=List[int])
+async def delete_many_users(delete_request: schemas.DeleteManyRequest, db: AsyncSession = Depends(database.get_db)):
+    deleted_ids = await crud.delete_many_users(db, delete_request.ids)
+    if not deleted_ids:
+        raise HTTPException(status_code=404, detail="No users found with these IDs")
+    return deleted_ids
+
 @app.post("/verify-user")
 async def verify_code(request: schemas.VerifyCodeRequest, db: AsyncSession = Depends(database.get_db)):
     result = await db.execute(
@@ -318,7 +325,7 @@ async def create_destination(
             shutil.copyfileobj(image.file, buffer)
         
         title = DestinationName
-        src = str(file_path)
+        src = f"/static/images/{filename}"
     else:
         title = None
         src = None
