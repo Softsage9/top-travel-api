@@ -21,7 +21,11 @@ from .database import async_session
 
 app = FastAPI()
 
-app.mount("/static", StaticFiles(directory="app/static"), name="static")
+BASE_DIR = Path(__file__).resolve().parent
+
+static_directory = BASE_DIR / "static"
+
+app.mount("/static", StaticFiles(directory=str(static_directory)), name="static")
 
 CORS_ALLOW_HEADERS = ["Content-Type", "Authorization", "X-Total-Count"]
 CORS_EXPOSE_HEADERS = ["X-Total-Count", "Content-Range"]
