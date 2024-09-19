@@ -25,6 +25,8 @@ BASE_DIR = Path(__file__).resolve().parent
 
 static_directory = BASE_DIR / "static"
 
+static_directory.mkdir(parents=True, exist_ok=True)
+
 app.mount("/static", StaticFiles(directory=str(static_directory)), name="static")
 
 CORS_ALLOW_HEADERS = ["Content-Type", "Authorization", "X-Total-Count"]
