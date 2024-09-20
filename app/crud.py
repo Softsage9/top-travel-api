@@ -571,7 +571,7 @@ async def get_destinations(
             Description=destination.Description,
             image=schemas.ImageBase(
                 title=destination.title,
-                src=destination.src,
+                src=f"/static/images/{destination.image.src}" if destination.image and destination.image.src else None,
                 rawFile=None
             )
         )
