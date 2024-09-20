@@ -21,18 +21,10 @@ from .database import async_session
 
 app = FastAPI()
 
-BASE_DIR = Path(__file__).resolve().parent
-
-IMAGEDIR = BASE_DIR / "static/images"
-
-IMAGEDIR.mkdir(parents=True, exist_ok=True)
-
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-logger.info(f"Using BASE_DIR: {BASE_DIR}")
-logger.info(f"Using IMAGEDIR: {IMAGEDIR}")
 
-app.mount("/static", StaticFiles(directory=str(IMAGEDIR.parent)), name="static")
+app.mount("/static", StaticFiles(directory=str(config.IMAGEDIR.parent)), name="static")
 
 CORS_ALLOW_HEADERS = ["Content-Type", "Authorization", "X-Total-Count"]
 CORS_EXPOSE_HEADERS = ["X-Total-Count", "Content-Range"]
@@ -329,14 +321,21 @@ async def create_destination(
     logger.info("Received request to create a destination")
     
     if image:
-        filename = f"{uuid.uuid4()}{Path(image.filename).suffix}"
-        file_path = config.IMAGEDIR / filename
+        try:
+            filename = f"{uuid.uuid4()}{Path(image.filename).suffix}"
+            file_path = config.IMAGEDIR / filename
 
-        with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(image.file, buffer)
-        
-        title = DestinationName
-        src = f"/static/images/{filename}"
+            with open(file_path, "wb") as buffer:
+                shutil.copyfileobj(image.file, buffer)
+            logger.info(f"Image saved successfully: {file_path}")
+
+            title = DestinationName
+            src = f"/static/images/{filename}"
+        except Exception as e:
+            logger.error(f"Error saving image: {str(e)}")
+            raise HTTPException(status_code=500, detail="Failed to save image")
+        finally:
+            await image.close()
     else:
         title = None
         src = None
