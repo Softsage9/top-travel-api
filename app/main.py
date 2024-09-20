@@ -330,7 +330,7 @@ async def create_destination(
             logger.info(f"Image saved successfully: {file_path}")
 
             title = DestinationName
-            src = f"/static/images/{filename}"
+            src = filename  
         except Exception as e:
             logger.error(f"Error saving image: {str(e)}")
             raise HTTPException(status_code=500, detail="Failed to save image")
