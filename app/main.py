@@ -23,11 +23,16 @@ app = FastAPI()
 
 BASE_DIR = Path(__file__).resolve().parent
 
-static_directory = BASE_DIR / "static"
+IMAGEDIR = BASE_DIR / "static/images"
 
-static_directory.mkdir(parents=True, exist_ok=True)
+IMAGEDIR.mkdir(parents=True, exist_ok=True)
 
-app.mount("/static", StaticFiles(directory=str(static_directory)), name="static")
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+logger.info(f"Using BASE_DIR: {BASE_DIR}")
+logger.info(f"Using IMAGEDIR: {IMAGEDIR}")
+
+app.mount("/static", StaticFiles(directory=str(IMAGEDIR.parent)), name="static")
 
 CORS_ALLOW_HEADERS = ["Content-Type", "Authorization", "X-Total-Count"]
 CORS_EXPOSE_HEADERS = ["X-Total-Count", "Content-Range"]
