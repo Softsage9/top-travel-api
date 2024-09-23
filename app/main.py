@@ -506,10 +506,21 @@ async def read_bookings(response: Response, skip: int = 0, limit: int = 10, db: 
 
     results = []
     for booking in bookings:
-        user_result = await db.execute(
-            select(models.User).filter(models.User.UserID == booking.UserID)
-        )
-        user = user_result.scalars().first()
+        user_email, user_first_name, user_last_name = None, None, None
+        # Fetch user details only if UserID is not None
+        if booking.UserID:
+            user_result = await db.execute(
+                select(models.User).filter(models.User.UserID == booking.UserID)
+            )
+            user = user_result.scalars().first()
+            if user:
+                user_email = user.Email
+                user_first_name = user.FirstName
+                user_last_name = user.LastName
+        else:
+            user_email = booking.UserEmail
+            user_first_name = booking.UserFirstName
+            user_last_name = booking.UserLastName
 
         results.append(schemas.BookingInDB(
             BookingID=booking.BookingID,
@@ -518,9 +529,9 @@ async def read_bookings(response: Response, skip: int = 0, limit: int = 10, db: 
             NumberOfPeople=booking.NumberOfPeople,
             UserID=booking.UserID,
             PackageID=booking.PackageID,
-            UserEmail=user.Email,
-            UserFirstName=user.FirstName,
-            UserLastName=user.LastName
+            UserEmail=user_email,
+            UserFirstName=user_first_name,
+            UserLastName=user_last_name
         ))
 
     return results
@@ -530,23 +541,11 @@ async def read_pending_bookings(skip: int = 0, limit: int = 10, db: AsyncSession
     db_bookings = await crud.get_bookings_by_status(db, models.BookingStatus.PENDING, skip=skip, limit=limit)
     
     bookings_with_user_info = [
-        schemas.BookingInDB(
-            BookingID=booking["BookingID"],
-            BookingDate=booking["BookingDate"],
-            Status=booking["Status"],
-            NumberOfPeople=booking["NumberOfPeople"],
-            UserID=booking["UserID"],
-            PackageID=booking["PackageID"],
-            UserEmail=booking["UserEmail"],
-            UserFirstName=booking["UserFirstName"],
-            UserLastName=booking["UserLastName"]
-        )
+        schemas.BookingInDB(**booking)  # Use dictionary unpacking to initialize Pydantic models
         for booking in db_bookings
     ]
     
     return bookings_with_user_info
-
-
 
 @app.get("/bookings/{booking_id}", response_model=schemas.BookingInDB)
 async def read_booking(booking_id: int, db: AsyncSession = Depends(database.get_db)):
@@ -581,20 +580,26 @@ async def update_booking_status(booking_id: int, status: models.BookingStatus, d
     if db_booking is None:
         raise HTTPException(status_code=404, detail="Booking not found")
 
-    # Fetch user details asynchronously
-    user_result = await db.execute(select(models.User).filter(models.User.UserID == db_booking.UserID))
-    user = user_result.scalars().first()
+    user_email, user_first_name, user_last_name = None, None, None
 
-    if user is None:
-        raise HTTPException(status_code=404, detail="User not found")
-    
-    if status == models.BookingStatus.CONFIRMED:
-        email_sender = os.getenv("EMAIL_SENDER")
-        email_password = os.getenv("EMAIL_PASSWORD")
-        try:
-            await crud.send_booking_email(email_sender, email_password, user.Email)
-        except Exception as e:
-            logging.error(f"Failed to send confirmation email: {str(e)}")
+    # Fetch user details only if UserID exists
+    if db_booking.UserID:
+        user_result = await db.execute(select(models.User).filter(models.User.UserID == db_booking.UserID))
+        user = user_result.scalars().first()
+        if user:
+            user_email = user.Email
+            user_first_name = user.FirstName
+            user_last_name = user.LastName
+        else:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        if status == models.BookingStatus.CONFIRMED:
+            email_sender = os.getenv("EMAIL_SENDER")
+            email_password = os.getenv("EMAIL_PASSWORD")
+            try:
+                await crud.send_booking_email(email_sender, email_password, user_email)
+            except Exception as e:
+                logging.error(f"Failed to send confirmation email: {str(e)}")
 
     return schemas.BookingInDB(
         BookingID=db_booking.BookingID,
@@ -603,10 +608,11 @@ async def update_booking_status(booking_id: int, status: models.BookingStatus, d
         NumberOfPeople=db_booking.NumberOfPeople,
         UserID=db_booking.UserID,
         PackageID=db_booking.PackageID,
-        UserEmail=user.Email,
-        UserFirstName=user.FirstName,
-        UserLastName=user.LastName
+        UserEmail=user_email,
+        UserFirstName=user_first_name,
+        UserLastName=user_last_name
     )
+
 @app.delete("/bookings/", response_model=List[int])
 async def delete_many_bookings(delete_request: schemas.DeleteManyRequest, db: AsyncSession = Depends(database.get_db)):
     deleted_ids = await crud.delete_many_bookings(db, delete_request.ids)

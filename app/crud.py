@@ -986,21 +986,20 @@ async def get_bookings_by_status(db: AsyncSession, status: models.BookingStatus,
     )
     bookings = result.scalars().all()
     
-    # Extract and include user details
-    bookings_with_user_info = [
-        {
+    bookings_with_user_info = []
+    for booking in bookings:
+        user = booking.user
+        bookings_with_user_info.append({
             "BookingID": booking.BookingID,
             "UserID": booking.UserID,
             "PackageID": booking.PackageID,
-            "BookingDate": booking.BookingDate,
-            "Status": booking.Status,
+            "BookingDate": booking.BookingDate.isoformat(),
+            "Status": booking.Status.value,  # Assuming Status is an enum
             "NumberOfPeople": booking.NumberOfPeople,
-            "UserEmail": booking.user.Email,
-            "UserFirstName": booking.user.FirstName,
-            "UserLastName": booking.user.LastName
-        }
-        for booking in bookings
-    ]
+            "UserEmail": user.Email if user else booking.UserEmail,  # Fallback to booking if no user
+            "UserFirstName": user.FirstName if user else booking.UserFirstName,
+            "UserLastName": user.LastName if user else booking.UserLastName
+        })
     
     return bookings_with_user_info
 
