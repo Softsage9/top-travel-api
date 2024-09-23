@@ -1005,20 +1005,33 @@ async def get_bookings_by_status(db: AsyncSession, status: models.BookingStatus,
     return bookings_with_user_info
 
 async def create_booking(db: AsyncSession, booking: schemas.BookingCreate):
+    is_guest = booking.UserID is None
+
     db_booking = models.Booking(
         UserID=booking.UserID,
         PackageID=booking.PackageID,
         Status=booking.Status,
-        NumberOfPeople=booking.NumberOfPeople
+        NumberOfPeople=booking.NumberOfPeople,
+        UserEmail=booking.UserEmail if is_guest else None,
+        UserFirstName=booking.UserFirstName if is_guest else None,
+        UserLastName=booking.UserLastName if is_guest else None
     )
     db.add(db_booking)
     await db.commit()
     await db.refresh(db_booking)
 
-    # Fetch user details
-    result = await db.execute(select(models.User).filter(models.User.UserID == booking.UserID))
-    user = result.scalars().first()
-
+    user_email, user_first_name, user_last_name = None, None, None
+    if not is_guest:
+        result = await db.execute(select(models.User).where(models.User.UserID == booking.UserID))
+        user = result.scalars().first()
+        if user:
+            user_email = user.Email
+            user_first_name = user.FirstName
+            user_last_name = user.LastName
+    else:
+        user_email = booking.UserEmail
+        user_first_name = booking.UserFirstName
+        user_last_name = booking.UserLastName
     return {
         "BookingID": db_booking.BookingID,
         "UserID": db_booking.UserID,
@@ -1026,9 +1039,9 @@ async def create_booking(db: AsyncSession, booking: schemas.BookingCreate):
         "BookingDate": db_booking.BookingDate,
         "Status": db_booking.Status,
         "NumberOfPeople": db_booking.NumberOfPeople,
-        "UserEmail": user.Email,
-        "UserFirstName": user.FirstName,
-        "UserLastName": user.LastName
+        "UserEmail": user_email,
+        "UserFirstName": user_first_name,
+        "UserLastName": user_last_name
     }
 
 async def delete_many_bookings(db: AsyncSession, ids: List[int]) -> List[int]:

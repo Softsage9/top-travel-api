@@ -97,11 +97,14 @@ class BookingStatus(str, Enum):
 class Booking(Base):
     __tablename__ = 'bookings'
     BookingID = Column(Integer, primary_key=True, autoincrement=True)
-    UserID = Column(Integer, ForeignKey('users.UserID'))
+    UserID = Column(Integer, ForeignKey('users.UserID'), nullable=True)
     PackageID = Column(Integer, ForeignKey('packages.PackageID'))
     BookingDate = Column(TIMESTAMP, server_default=func.now())
     Status = Column(SQLAEnum(BookingStatus), default=BookingStatus.PENDING, nullable=False)
     NumberOfPeople = Column(Integer)
+    UserEmail = Column(String, nullable=True) 
+    UserFirstName = Column(String, nullable=True)  
+    UserLastName = Column(String, nullable=True) 
     user = relationship('User', back_populates='bookings')
     package = relationship('Package', back_populates='bookings')
     payment = relationship('Payment', back_populates='booking', uselist=False)

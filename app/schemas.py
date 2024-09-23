@@ -112,10 +112,13 @@ class BookingStatus(str, Enum):
     CANCELLED = "CANCELLED"
 
 class BookingBase(BaseModel):
-    UserID: int
+    UserID: Optional[int] = None
     PackageID: int
     Status: BookingStatus = BookingStatus.PENDING
     NumberOfPeople: int
+    UserEmail: Optional[EmailStr] = None
+    UserFirstName: Optional[str] = None
+    UserLastName: Optional[str] = None
 
 class BookingCreate(BookingBase):
     pass
@@ -123,12 +126,9 @@ class BookingCreate(BookingBase):
 class BookingInDB(BookingBase):
     BookingID: int
     BookingDate: datetime
-    UserEmail: Optional[str]
-    UserFirstName: Optional[str]
-    UserLastName: Optional[str]
 
     class Config:
-        from_attributes= True        
+        orm_mode = True      
 class ReviewBase(BaseModel):
     UserID: int
     PackageID: int
