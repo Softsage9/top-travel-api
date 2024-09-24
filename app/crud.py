@@ -779,10 +779,14 @@ async def get_packages(db: AsyncSession, skip: int = 0, limit: int = 10) -> List
         country = None
 
         if destination:
-            file_name = destination.src.split('\\')[-1] if destination.src else 'default.png'
+            if "/static/images/" in destination.src:
+                file_name = destination.src 
+            else:
+                file_name = f"/static/images/{destination.src.split('\\')[-1]}" 
+            
             image_info = {
                 "rawFile": destination.rawFile,
-                "src": f"https://server-app-zxcxm.ondigitalocean.app/static/images/{file_name}",
+                "src": f"https://server-app-zxcxm.ondigitalocean.app{file_name}", 
                 "title": destination.title,
             }
             country = destination.Country
@@ -823,14 +827,19 @@ async def get_packages_by_destination_id(db: AsyncSession, destination_id: int) 
         country = None
 
         if destination:
-            file_name = destination.src.split('\\')[-1] if destination.src else 'default.png'
+            # Check if destination.src already includes '/static/images/'
+            if "/static/images/" in destination.src:
+                file_name = destination.src  # Use the full path directly if it's already included
+            else:
+                file_name = f"/static/images/{destination.src.split('\\')[-1]}"  # Extract just the filename
+            
             image_info = schemas.ImageBase(
                 rawFile=destination.rawFile,
-                src=f"https://server-app-zxcxm.ondigitalocean.app/static/images/{file_name}",
+                src=f"https://server-app-zxcxm.ondigitalocean.app{file_name}",  # Prepend the base URL properly
                 title=destination.title,
             )
             country = destination.Country
-
+            
         results.append(schemas.PackageInDB(
             PackageID=package.PackageID,
             PackageName=package.PackageName,
@@ -890,10 +899,15 @@ async def update_package(db: AsyncSession, package_id: int, package_update: sche
         country = None
 
         if destination:
-            file_name = destination.src.split('\\')[-1] if destination.src else 'default.png'
+            # Check if destination.src already includes '/static/images/'
+            if "/static/images/" in destination.src:
+                file_name = destination.src  # Use the full path if it's already included
+            else:
+                file_name = f"/static/images/{destination.src.split('\\')[-1]}"  # Extract the filename
+
             image_info = schemas.ImageBase(
                 rawFile=destination.rawFile,
-                src=f"https://server-app-zxcxm.ondigitalocean.app/static/images/{file_name}",
+                src=f"https://server-app-zxcxm.ondigitalocean.app{file_name}",  # Construct the full URL
                 title=destination.title,
             )
             country = destination.Country
