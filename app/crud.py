@@ -967,14 +967,14 @@ async def get_booking(db: AsyncSession, booking_id: int):
     booking = result.scalars().first()
     return booking
 
-async def get_booking_with_user(db: AsyncSession, booking_id: int):
+async def get_user_bookings(db: AsyncSession, user_id: int):
     result = await db.execute(
         select(models.Booking)
-        .options(joinedload(models.Booking.user))
-        .filter(models.Booking.BookingID == booking_id)
+        .options(joinedload(models.Booking.user)) 
+        .filter(models.Booking.UserID == user_id)
     )
-    booking = result.scalars().first()
-    return booking
+    bookings = result.scalars().all() 
+    return bookings
 
 async def get_bookings_by_status(db: AsyncSession, status: models.BookingStatus, skip: int = 0, limit: int = 10):
     result = await db.execute(

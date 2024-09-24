@@ -322,18 +322,34 @@ async def create_destination(
     
     if image:
         try:
+            # Generate a unique filename for the image
             filename = f"{uuid.uuid4()}{Path(image.filename).suffix}"
             file_path = config.IMAGEDIR / filename
 
+            logger.info(f"Image will be saved to: {file_path}")
+
+            # Check if directory is writable
+            if not os.access(config.IMAGEDIR, os.W_OK):
+                logger.error(f"Directory not writable: {config.IMAGEDIR}")
+                raise HTTPException(status_code=500, detail="Directory not writable")
+
+            # Save the image
             with open(file_path, "wb") as buffer:
                 shutil.copyfileobj(image.file, buffer)
             logger.info(f"Image saved successfully: {file_path}")
 
+            # Check if the file was actually saved
+            if not file_path.exists():
+                logger.error(f"File not found after saving: {file_path}")
+                raise HTTPException(status_code=500, detail="File not found after saving")
+
+            # Construct the relative path to be saved in the database
             title = DestinationName
-            src = filename  
+            src = f"/static/images/{filename}"  # Ensure correct URL path for serving
         except Exception as e:
             logger.error(f"Error saving image: {str(e)}")
-            raise HTTPException(status_code=500, detail="Failed to save image")
+            logger.error(f"File Path: {file_path}")
+            raise HTTPException(status_code=500, detail=f"Failed to save image: {str(e)}")
         finally:
             await image.close()
     else:
@@ -535,6 +551,15 @@ async def read_bookings(response: Response, skip: int = 0, limit: int = 10, db: 
         ))
 
     return results
+
+@app.get("/user-booking-history", response_model=List[schemas.BookingInDB])
+async def user_booking_history(user_id: int, db: AsyncSession = Depends(database.get_db)):
+    bookings = await crud.get_user_bookings(db, user_id)
+    
+    if not bookings:
+        raise HTTPException(status_code=404, detail="No bookings found for the user")
+    
+    return bookings
 
 @app.get("/bookings/pending", response_model=List[schemas.BookingInDB])
 async def read_pending_bookings(skip: int = 0, limit: int = 10, db: AsyncSession = Depends(database.get_db)):
