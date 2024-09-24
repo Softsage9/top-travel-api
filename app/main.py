@@ -24,7 +24,8 @@ app = FastAPI()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app.mount("/static", StaticFiles(directory=str(config.IMAGEDIR.parent)), name="static")
+
+app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 CORS_ALLOW_HEADERS = ["Content-Type", "Authorization", "X-Total-Count"]
 CORS_EXPOSE_HEADERS = ["X-Total-Count", "Content-Range"]
@@ -321,37 +322,14 @@ async def create_destination(
     logger.info("Received request to create a destination")
     
     if image:
-        try:
-            # Generate a unique filename for the image
-            filename = f"{uuid.uuid4()}{Path(image.filename).suffix}"
-            file_path = config.IMAGEDIR / filename
+        filename = f"{uuid.uuid4()}{Path(image.filename).suffix}"
+        file_path = config.IMAGEDIR / filename
 
-            logger.info(f"Image will be saved to: {file_path}")
-
-            # Check if directory is writable
-            if not os.access(config.IMAGEDIR, os.W_OK):
-                logger.error(f"Directory not writable: {config.IMAGEDIR}")
-                raise HTTPException(status_code=500, detail="Directory not writable")
-
-            # Save the image
-            with open(file_path, "wb") as buffer:
-                shutil.copyfileobj(image.file, buffer)
-            logger.info(f"Image saved successfully: {file_path}")
-
-            # Check if the file was actually saved
-            if not file_path.exists():
-                logger.error(f"File not found after saving: {file_path}")
-                raise HTTPException(status_code=500, detail="File not found after saving")
-
-            # Construct the relative path to be saved in the database
-            title = DestinationName
-            src = f"/static/images/{filename}"  # Ensure correct URL path for serving
-        except Exception as e:
-            logger.error(f"Error saving image: {str(e)}")
-            logger.error(f"File Path: {file_path}")
-            raise HTTPException(status_code=500, detail=f"Failed to save image: {str(e)}")
-        finally:
-            await image.close()
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(image.file, buffer)
+        
+        title = DestinationName
+        src = f"/static/images/{filename}"
     else:
         title = None
         src = None
