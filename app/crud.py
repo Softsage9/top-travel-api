@@ -734,10 +734,15 @@ async def get_package(db: AsyncSession, package_id: int) -> schemas.PackageInDB:
     country = None
 
     if destination:
-        file_name = destination.src.split('\\')[-1] if destination.src else 'default.png'
+        # Check if destination.src already includes '/static/images/'
+        if "/static/images/" in destination.src:
+            file_name = destination.src  # Use the full path if already included
+        else:
+            file_name = f"/static/images/{destination.src.split('\\')[-1]}"  # Extract filename and prepend the path
+
         image_info = schemas.ImageBase(
             rawFile=destination.rawFile,
-            src=f"https://server-app-zxcxm.ondigitalocean.app/static/images/{file_name}",
+            src=f"https://server-app-zxcxm.ondigitalocean.app{file_name}",  # Correctly handle the URL construction
             title=destination.title,
         )
         country = destination.Country
