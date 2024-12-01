@@ -292,9 +292,8 @@ async def handle_logout(token: str, db: AsyncSession, error_message: str):
 # Send Email Verification
 
 async def send_verification_email(email_sender, email_password, email_receiver, code):
-    smtp_server = "smtp.gmail.com"
+    smtp_server = "smtp.ionos.com"
     smtp_port = 465
-
 
     message = MIMEMultipart('alternative')
     message["From"] = email_sender
@@ -360,7 +359,7 @@ async def send_verification_email(email_sender, email_password, email_receiver, 
         print(f"Invalid email address: {e}")
 
 async def send_reset_password_email(email_sender, email_password, email_receiver, reset_code):
-    smtp_server = "smtp.gmail.com"
+    smtp_server = "smtp.ionos.com"
     smtp_port = 465
 
     message = MIMEMultipart()
@@ -401,7 +400,7 @@ async def send_reset_password_email(email_sender, email_password, email_receiver
         print(f"Invalid email address: {e}")       
 
 async def send_booking_email(email_sender, email_password, email_receiver):
-    smtp_server = "smtp.gmail.com"
+    smtp_server = "smtp.ionos.com"
     smtp_port = 465
 
     message = MIMEMultipart()

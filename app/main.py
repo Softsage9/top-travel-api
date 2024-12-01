@@ -667,8 +667,9 @@ async def create_checkout_session(request: schemas.CheckoutSessionRequest, db: A
 @app.post("/webhook")
 async def stripe_webhook(request: Request, db: AsyncSession = Depends(database.get_db)):
     payload = await request.body()
-    sig_header = request.headers.get('stripe-signature')
+    sig_header = request.headers.get("stripe-signature")
 
+    endpoint_secret = "your-stripe-endpoint-secret"  # Add your endpoint secret
     event = None
 
     try:
@@ -684,35 +685,36 @@ async def stripe_webhook(request: Request, db: AsyncSession = Depends(database.g
     except Exception as e:
         logger.error(f"Error verifying webhook signature: {e}")
         return JSONResponse(status_code=500, content={"detail": "Internal server error"})
-    # Handle the checkout.session.completed event
+
+    # Handle the events
     try:
         if event['type'] == 'checkout.session.completed':
             session = event['data']['object']
             payment_intent_id = session.get('payment_intent')
-            booking_id = session['metadata'].get('booking_id')
+            booking_id = session.get('metadata', {}).get('booking_id')
             amount_total = session['amount_total'] / 100
             await crud.update_payment(db, session.id, payment_intent_id, amount_total, booking_id)
 
-        # elif event['type'] == 'payment_intent.succeeded':
-        #     payment_intent_id = event['data']['object']['id']
-
-        #     # Check for duplicate PaymentIntentID before proceeding
-        #     existing_payment = await db.execute(select(models.Payment).filter(models.Payment.PaymentIntentID == payment_intent_id))
-        #     if existing_payment.scalars().first():
-        #         logger.info(f"PaymentIntentID {payment_intent_id} already exists, skipping insertion.")
-        #         return JSONResponse(status_code=200, content={"detail": "Duplicate PaymentIntentID, skipping insertion."})
-
-        #     return await crud.handle_payment_intent_succeeded(event['data'], db)
-        
-        elif event['type'] == 'payment_intent.payment_failed':
+        elif event['type'] == 'checkout.session.async_payment_failed':
             payment_intent = event['data']['object']
             return await crud.handle_payment_intent_failed(payment_intent, db)
+
+        elif event['type'] == 'checkout.session.async_payment_succeeded':
+            session = event['data']['object']
+            payment_intent_id = session.get('payment_intent')
+            booking_id = session.get('metadata', {}).get('booking_id')
+            amount_total = session['amount_total'] / 100
+            await crud.update_payment(db, session.id, payment_intent_id, amount_total, booking_id)
+
+        else:
+            logger.warning(f"Unhandled event type: {event['type']}")
+            return JSONResponse(status_code=200, content={"detail": f"Unhandled event type: {event['type']}"})
+
     except Exception as e:
         logger.error(f"Error handling webhook event: {e}")
         return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
     return JSONResponse(status_code=200, content={"detail": "Success"})
-
 
 @app.get("/payments/", response_model=List[schemas.PaymentInDB])
 async def read_payments(response: Response,  # Include the Response object here (non-default argument)
