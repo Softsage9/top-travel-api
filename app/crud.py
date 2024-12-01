@@ -945,23 +945,31 @@ async def delete_package(db: AsyncSession, package_id: int):
     return package
 
 async def delete_many_packages(db: AsyncSession, ids: list[int]) -> list[int]:
+    # Fetch packages from the database
     query = select(models.Package).where(models.Package.PackageID.in_(ids))
     result = await db.execute(query)
     packages = result.scalars().all()
+
     if not packages:
         raise HTTPException(status_code=404, detail="Packages not found")
     
     for package in packages:
         if package.StripeProductID:
             try:
-                # Archive the Stripe product
-                stripe.Product.modify(
-                    package.StripeProductID,
-                    active=False
-                )
+                # Fetch all prices associated with the product
+                prices = stripe.Price.list(product=package.StripeProductID)
+                for price in prices['data']:
+                    try:
+                        # Delete each price
+                        stripe.Price.delete(price['id'])
+                    except stripe.error.StripeError as e:
+                        raise HTTPException(status_code=400, detail=f"Stripe error deleting price: {str(e)}")
+
+                # Delete the product after all prices are deleted
+                stripe.Product.delete(package.StripeProductID)
             except stripe.error.StripeError as e:
                 raise HTTPException(status_code=400, detail=f"Stripe error: {str(e)}")
-        
+
         # Delete the package from the database
         await db.delete(package)
     
@@ -969,6 +977,7 @@ async def delete_many_packages(db: AsyncSession, ids: list[int]) -> list[int]:
     await db.commit()
     
     return ids
+
 
 # End Of Package
 
