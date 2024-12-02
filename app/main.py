@@ -666,6 +666,7 @@ async def create_checkout_session(request: schemas.CheckoutSessionRequest, db: A
 
 @app.post("/webhook")
 async def stripe_webhook(request: Request, db: AsyncSession = Depends(database.get_db)):
+    logger.info("Webhook received")
     payload = await request.body()
     sig_header = request.headers.get("stripe-signature")
 
