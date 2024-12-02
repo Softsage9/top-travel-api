@@ -700,12 +700,12 @@ async def stripe_webhook(request: Request, db: AsyncSession = Depends(database.g
             payment_intent = event['data']['object']
             return await crud.handle_payment_intent_failed(payment_intent, db)
 
-        elif event['type'] == 'checkout.session.async_payment_succeeded':
-            session = event['data']['object']
-            payment_intent_id = session.get('payment_intent')
-            booking_id = session.get('metadata', {}).get('booking_id')
-            amount_total = session['amount_total'] / 100
-            await crud.update_payment(db, session.id, payment_intent_id, amount_total, booking_id)
+        # elif event['type'] == 'checkout.session.async_payment_succeeded':
+        #     session = event['data']['object']
+        #     payment_intent_id = session.get('payment_intent')
+        #     booking_id = session.get('metadata', {}).get('booking_id')
+        #     amount_total = session['amount_total'] / 100
+        #     await crud.update_payment(db, session.id, payment_intent_id, amount_total, booking_id)
 
         else:
             logger.warning(f"Unhandled event type: {event['type']}")
