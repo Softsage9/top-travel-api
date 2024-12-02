@@ -666,11 +666,10 @@ async def create_checkout_session(request: schemas.CheckoutSessionRequest, db: A
 
 @app.post("/webhook")
 async def stripe_webhook(request: Request, db: AsyncSession = Depends(database.get_db)):
-    logger.info("Webhook received")
+    logger.info(f"Webhook received with method {request.method}")
     payload = await request.body()
+    logger.info(f"Headers: {request.headers}")
     sig_header = request.headers.get("stripe-signature")
-
-    endpoint_secret = "your-stripe-endpoint-secret"  # Add your endpoint secret
     event = None
 
     try:
