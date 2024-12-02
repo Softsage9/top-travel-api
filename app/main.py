@@ -665,56 +665,32 @@ async def create_checkout_session(request: schemas.CheckoutSessionRequest, db: A
         raise HTTPException(status_code=400, detail=str(e))
 
 @app.post("/webhook")
-async def stripe_webhook(request: Request, db: AsyncSession = Depends(database.get_db)):
-    logger.info(f"Webhook received with method {request.method}")
+async def stripe_webhook(request: Request):
     payload = await request.body()
-    logger.info(f"Headers: {request.headers}")
     sig_header = request.headers.get("stripe-signature")
-    event = None
+
+    if not sig_header:
+        raise HTTPException(status_code=400, detail="Missing Stripe signature")
 
     try:
         event = stripe.Webhook.construct_event(
             payload, sig_header, endpoint_secret
         )
-    except ValueError as e:
-        logger.error(f"Invalid payload: {e}")
+    except ValueError:
         return JSONResponse(status_code=400, content={"detail": "Invalid payload"})
-    except stripe.error.SignatureVerificationError as e:
-        logger.error(f"Invalid signature: {e}")
+    except stripe.error.SignatureVerificationError:
         return JSONResponse(status_code=400, content={"detail": "Invalid signature"})
-    except Exception as e:
-        logger.error(f"Error verifying webhook signature: {e}")
-        return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
-    # Handle the events
-    try:
-        if event['type'] == 'checkout.session.completed':
-            session = event['data']['object']
-            payment_intent_id = session.get('payment_intent')
-            booking_id = session.get('metadata', {}).get('booking_id')
-            amount_total = session['amount_total'] / 100
-            await crud.update_payment(db, session.id, payment_intent_id, amount_total, booking_id)
+    # Handle the event
+    if event['type'] == 'checkout.session.completed':
+        session = event['data']['object']  # The session object
+        # Perform actions here (e.g., fulfill orders)
+        print("Checkout session completed:", session)
+        # Respond to Stripe to acknowledge receipt of the event
+        return JSONResponse(status_code=200, content={"detail": "Webhook received"})
+    else:
+        return JSONResponse(status_code=200, content={"detail": "Unhandled event type"})
 
-        elif event['type'] == 'checkout.session.async_payment_failed':
-            payment_intent = event['data']['object']
-            return await crud.handle_payment_intent_failed(payment_intent, db)
-
-        # elif event['type'] == 'checkout.session.async_payment_succeeded':
-        #     session = event['data']['object']
-        #     payment_intent_id = session.get('payment_intent')
-        #     booking_id = session.get('metadata', {}).get('booking_id')
-        #     amount_total = session['amount_total'] / 100
-        #     await crud.update_payment(db, session.id, payment_intent_id, amount_total, booking_id)
-
-        else:
-            logger.warning(f"Unhandled event type: {event['type']}")
-            return JSONResponse(status_code=200, content={"detail": f"Unhandled event type: {event['type']}"})
-
-    except Exception as e:
-        logger.error(f"Error handling webhook event: {e}")
-        return JSONResponse(status_code=500, content={"detail": "Internal server error"})
-
-    return JSONResponse(status_code=200, content={"detail": "Success"})
 
 @app.get("/payments/", response_model=List[schemas.PaymentInDB])
 async def read_payments(response: Response,  # Include the Response object here (non-default argument)
