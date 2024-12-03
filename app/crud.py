@@ -401,16 +401,16 @@ async def send_reset_password_email(email_sender, email_password, email_receiver
 
 async def send_booking_email(email_sender, email_password, email_receiver):
     smtp_server = "smtp.ionos.com"
-    smtp_port = 587
+    smtp_port = 587  # TLS port
 
     message = MIMEMultipart()
     message["From"] = email_sender
     message["To"] = email_receiver
     message["Subject"] = "Your Booking Has Been Accepted - Top Travel"
-    body = f"""
+    body = """
     Dear Customer,
 
-    Welcome to Top Travel! Thank you for choosing us for your travel needs. Your booking request has been successfully confirmed. This is an automated E-mail do not anwer to this!
+    Welcome to Top Travel! Thank you for choosing us for your travel needs. Your booking request has been successfully confirmed. This is an automated email. Do not reply to this!
 
     Best regards,
     The Top Travel Team
@@ -420,9 +420,12 @@ async def send_booking_email(email_sender, email_password, email_receiver):
     def send_email():
         try:
             logging.info("Connecting to SMTP server")
-            smtp_obj = smtplib.SMTP_SSL(smtp_server, smtp_port)
+            smtp_obj = smtplib.SMTP(smtp_server, smtp_port)  # Use smtplib.SMTP for TLS
+            smtp_obj.ehlo()  # Identify yourself to the server
+            smtp_obj.starttls()  # Upgrade to a secure connection
+            smtp_obj.ehlo()  # Re-identify after upgrading
             logging.info("Logging in to SMTP server")
-            smtp_obj.login(email_sender, email_password)
+            smtp_obj.login(email_sender, email_password)  # Login to the email server
             logging.info("Sending email")
             smtp_obj.send_message(message)
             smtp_obj.quit()
@@ -431,11 +434,12 @@ async def send_booking_email(email_sender, email_password, email_receiver):
             logging.error(f"Failed to send booking email: {e}")
 
     try:
-        validate_email(email_receiver)  # Validate email format
-        print(f"Email {email_receiver} is valid")
-        await asyncio.to_thread(send_email) 
+        # Validate the email format
+        validate_email(email_receiver)
+        logging.info(f"Email {email_receiver} is valid")
+        await asyncio.to_thread(send_email)  # Run the email-sending logic in a thread
     except EmailNotValidError as e:
-        print(f"Invalid email address: {e}")
+        logging.error(f"Invalid email address: {e}")
         
 # End Of Send Email Verification
 
