@@ -15,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from starlette import status
 import stripe
+from stripe.checkout import Session
 import uvicorn
 from . import crud, models, schemas, database, config
 from .database import async_session
@@ -40,7 +41,7 @@ app.add_middleware(
 )
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
-load_dotenv()
+load_dotenv(override=True)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -55,6 +56,7 @@ async def init_models():
 
 @app.on_event("startup")
 async def on_startup():
+    print("Stripe API Key:", os.getenv("STRIPE_API_KEY"))
     await database.check_connection()
     await database.check_connection()
     await init_models()
@@ -650,6 +652,8 @@ async def create_checkout_session(request: schemas.CheckoutSessionRequest, db: A
             metadata={'booking_id': str(request.booking_id)},
             automatic_tax={'enabled': True},
         )
+        
+        logger.info(f"Booking ID being passed to metadata: {request.booking_id}")
 
         logger.info(f"Complete session details: {session}")
 
@@ -669,13 +673,12 @@ async def stripe_webhook(request: Request, db: AsyncSession = Depends(database.g
     logger.info(f"Webhook received with method {request.method}")
     payload = await request.body()
     logger.info(f"Headers: {request.headers}")
-    sig_header = request.headers.get("stripe-signature")
-    event = None
+    signature = request.headers.get("stripe-signature")
+    event: stripe.Event = None
 
     try:
-        event = stripe.Webhook.construct_event(
-            payload, sig_header, endpoint_secret
-        )
+        # Construct the Stripe event and verify signature
+        event = stripe.Webhook.construct_event(payload, signature, endpoint_secret)
     except ValueError as e:
         logger.error(f"Invalid payload: {e}")
         return JSONResponse(status_code=400, content={"detail": "Invalid payload"})
@@ -686,25 +689,32 @@ async def stripe_webhook(request: Request, db: AsyncSession = Depends(database.g
         logger.error(f"Error verifying webhook signature: {e}")
         return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
-    # Handle the events
     try:
+        # Handle the checkout.session.completed event
         if event['type'] == 'checkout.session.completed':
-            session = event['data']['object']
-            payment_intent_id = session.get('payment_intent')
-            booking_id = session.get('metadata', {}).get('booking_id')
-            amount_total = session['amount_total'] / 100
-            await crud.update_payment(db, session.id, payment_intent_id, amount_total, booking_id)
+            session_data = event['data']['object']  # Retrieve session data directly from the event
+            session_id = session_data['id']  # Extract the session ID
+            payment_intent_id = session_data.get('payment_intent')  # Payment Intent ID
+            amount_total = session_data['amount_total'] / 100  # Stripe uses the smallest currency unit
 
-        elif event['type'] == 'checkout.session.async_payment_failed':
-            payment_intent = event['data']['object']
-            return await crud.handle_payment_intent_failed(payment_intent, db)
+            logger.info(f"Session ID: {session_id}, Payment Intent ID: {payment_intent_id}, Amount: {amount_total}")
 
-        # elif event['type'] == 'checkout.session.async_payment_succeeded':
-        #     session = event['data']['object']
-        #     payment_intent_id = session.get('payment_intent')
-        #     booking_id = session.get('metadata', {}).get('booking_id')
-        #     amount_total = session['amount_total'] / 100
-        #     await crud.update_payment(db, session.id, payment_intent_id, amount_total, booking_id)
+            # Fetch the associated booking ID from the database
+            result = await db.execute(select(models.Payment).where(models.Payment.SessionID == session_id))
+            payment = result.scalar_one_or_none()
+
+            if not payment:
+                logger.warning(f"No payment record found for Session ID: {session_id}")
+                raise ValueError("Payment record not found for Session ID")
+
+            # Update the payment in the database
+            await crud.update_payment(
+                db,
+                session_id,  # Checkout Session ID
+                payment_intent_id,
+                amount_total,
+                payment.BookingID,  # Use BookingID from the database
+            )
 
         else:
             logger.warning(f"Unhandled event type: {event['type']}")
@@ -715,6 +725,7 @@ async def stripe_webhook(request: Request, db: AsyncSession = Depends(database.g
         return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
     return JSONResponse(status_code=200, content={"detail": "Success"})
+
 
 @app.get("/payments/", response_model=List[schemas.PaymentInDB])
 async def read_payments(response: Response,  # Include the Response object here (non-default argument)

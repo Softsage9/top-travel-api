@@ -1199,15 +1199,44 @@ async def update_payment_intent_succeeded(db: AsyncSession, session_id: str, pay
         await db.commit()
 
 async def update_payment(db: AsyncSession, session_id: str, payment_intent_id: str, amount: float, booking_id: str):
-    payment = await db.execute(select(models.Payment).where(models.Payment.SessionID == session_id))
-    payment = payment.scalar_one_or_none()
-    if payment:
-        payment.PaymentIntentID = payment_intent_id
-        payment.Amount = amount
-        payment.BookingID = booking_id
-        payment.Status = 'completed'
-        payment.PaymentDate = datetime.utcnow()
+    try:
+        # Check if the payment record already exists
+        result = await db.execute(select(models.Payment).where(models.Payment.SessionID == session_id))
+        payment = result.scalar_one_or_none()
+
+        if payment:
+            # Update existing payment record
+            payment.PaymentIntentID = payment_intent_id
+            payment.Amount = amount
+            payment.BookingID = booking_id
+            payment.Status = 'completed'
+            payment.PaymentDate = datetime.utcnow()
+            logger.info("Existing payment record updated successfully.")
+        else:
+            # Create a new payment record if none exists
+            new_payment = models.Payment(
+                SessionID=session_id,
+                PaymentIntentID=payment_intent_id,
+                Amount=amount,
+                BookingID=booking_id,
+                Status='completed',
+                PaymentDate=datetime.utcnow(),
+            )
+            db.add(new_payment)
+            logger.info("New payment record created successfully.")
+
+        # Commit changes to the database
         await db.commit()
+        return True
+
+    except SQLAlchemyError as e:
+        logger.error(f"Database error during payment update: {str(e)}")
+        await db.rollback()
+        return False
+    except Exception as e:
+        logger.error(f"Unexpected error during payment update: {str(e)}")
+        await db.rollback()
+        return False
 
 async def delete_many_payments(db: AsyncSession, ids: List[int]) -> List[int]:
     print("Fetching payments to delete:", ids)

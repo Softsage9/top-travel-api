@@ -5,7 +5,6 @@ from pydantic import BaseModel, EmailStr, Field
 from typing import List, Optional
 from datetime import date, datetime
 
-from app import models
 from app.models import BookingStatus
 
 class UserBase(BaseModel):
@@ -171,7 +170,7 @@ class PaymentResponse(BaseModel):
     total: int
 class CheckoutSessionRequest(BaseModel):
     package_id: int
-    booking_id: int
+    booking_id: Optional[int] = None
     price_id: str
 class SessionTokenBase(BaseModel):
     token: str = Field(..., description="The unique token")
