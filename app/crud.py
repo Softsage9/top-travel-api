@@ -401,7 +401,7 @@ async def send_reset_password_email(email_sender, email_password, email_receiver
 
 async def send_booking_email(email_sender, email_password, email_receiver):
     smtp_server = "smtp.ionos.com"
-    smtp_port = 465
+    smtp_port = 587
 
     message = MIMEMultipart()
     message["From"] = email_sender
@@ -428,7 +428,7 @@ async def send_booking_email(email_sender, email_password, email_receiver):
             smtp_obj.quit()
             logging.info("Email sent successfully.")
         except Exception as e:
-            logging.error(f"Failed to send reset password email: {e}")
+            logging.error(f"Failed to send booking email: {e}")
 
     try:
         validate_email(email_receiver)  # Validate email format
