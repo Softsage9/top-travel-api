@@ -292,8 +292,8 @@ async def handle_logout(token: str, db: AsyncSession, error_message: str):
 # Send Email Verification
 
 async def send_verification_email(email_sender, email_password, email_receiver, code):
-    smtp_server = "smtp.ionos.com"
-    smtp_port = 465
+    smtp_server = "smtp.ionos.co.uk"
+    smtp_port = 587 
 
     message = MIMEMultipart('alternative')
     message["From"] = email_sender
@@ -343,24 +343,31 @@ async def send_verification_email(email_sender, email_password, email_receiver, 
 
     def send_email():
         try:
-            smtp_obj = smtplib.SMTP_SSL(smtp_server, smtp_port)
-            smtp_obj.login(email_sender, email_password)
+            logging.info("Connecting to SMTP server")
+            smtp_obj = smtplib.SMTP(smtp_server, smtp_port)  # Use smtplib.SMTP for TLS
+            smtp_obj.ehlo()  # Identify yourself to the server
+            smtp_obj.starttls()  # Upgrade to a secure connection
+            smtp_obj.ehlo()  # Re-identify after upgrading
+            logging.info("Logging in to SMTP server")
+            smtp_obj.login(email_sender, email_password)  # Login to the email server
+            logging.info("Sending email")
             smtp_obj.send_message(message)
             smtp_obj.quit()
-            print('Email sent successfully.')
+            logging.info("Email sent successfully.")
         except Exception as e:
-            print(f"Failed to send verification email: {e}")
+            logging.error(f"Failed to send verification email: {e}")
 
     try:
-        validate_email(email_receiver)  # This throws EmailNotValidError if invalid
-        print(f"Email {email_receiver} is valid")
-        await asyncio.to_thread(send_email)  # Run blocking function in a separate thread
+        # Validate the email format
+        validate_email(email_receiver)
+        logging.info(f"Email {email_receiver} is valid")
+        await asyncio.to_thread(send_email)  # Run the email-sending logic in a thread
     except EmailNotValidError as e:
-        print(f"Invalid email address: {e}")
+        logging.error(f"Invalid email address: {e}")
 
 async def send_reset_password_email(email_sender, email_password, email_receiver, reset_code):
-    smtp_server = "smtp.ionos.com"
-    smtp_port = 465
+    smtp_server = "smtp.ionos.co.uk"
+    smtp_port = 587 
 
     message = MIMEMultipart()
     message["From"] = email_sender
@@ -385,22 +392,30 @@ async def send_reset_password_email(email_sender, email_password, email_receiver
 
     def send_email():
         try:
-            smtp_obj = smtplib.SMTP_SSL(smtp_server, smtp_port)
-            smtp_obj.login(email_sender, email_password)
+            logging.info("Connecting to SMTP server")
+            smtp_obj = smtplib.SMTP(smtp_server, smtp_port)  # Use smtplib.SMTP for TLS
+            smtp_obj.ehlo()  # Identify yourself to the server
+            smtp_obj.starttls()  # Upgrade to a secure connection
+            smtp_obj.ehlo()  # Re-identify after upgrading
+            logging.info("Logging in to SMTP server")
+            smtp_obj.login(email_sender, email_password)  # Login to the email server
+            logging.info("Sending email")
             smtp_obj.send_message(message)
             smtp_obj.quit()
-            print('Reset password email sent successfully.')
+            logging.info("Email sent successfully.")
         except Exception as e:
-            print(f"Failed to send reset password email: {e}")
+            logging.error(f"Failed to send reset password email: {e}")
 
     try:
-        validate_email(email_receiver)  
-        await asyncio.to_thread(send_email)  
+        # Validate the email format
+        validate_email(email_receiver)
+        logging.info(f"Email {email_receiver} is valid")
+        await asyncio.to_thread(send_email)  # Run the email-sending logic in a thread
     except EmailNotValidError as e:
-        print(f"Invalid email address: {e}")       
+        logging.error(f"Invalid email address: {e}")
 
 async def send_booking_email(email_sender, email_password, email_receiver):
-    smtp_server = "smtp.ionos.com"
+    smtp_server = "smtp.ionos.co.uk"
     smtp_port = 587  # TLS port
 
     message = MIMEMultipart()
