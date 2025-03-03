@@ -455,6 +455,49 @@ async def send_booking_email(email_sender, email_password, email_receiver):
         await asyncio.to_thread(send_email)  # Run the email-sending logic in a thread
     except EmailNotValidError as e:
         logging.error(f"Invalid email address: {e}")
+
+async def send_booking_notification(email_password):
+    email_sender = "info@toptravel-albania.com"
+    smtp_server = "smtp.ionos.co.uk"
+    smtp_port = 587  # TLS port
+
+    message = MIMEMultipart()
+    message["From"] = email_sender
+    message["To"] = email_sender  # Send notification to yourself
+    message["Subject"] = "New Booking Notification - Top Travel"
+    body = """
+    Dear Admin,
+
+    A new booking has been made. Please log in to the admin panel to view the details.
+
+    Best regards,
+    The Top Travel System
+    """
+    message.attach(MIMEText(body, 'plain'))
+
+    def send_email():
+        try:
+            logging.info("Connecting to SMTP server")
+            smtp_obj = smtplib.SMTP(smtp_server, smtp_port)
+            smtp_obj.ehlo()
+            smtp_obj.starttls()
+            smtp_obj.ehlo()
+            logging.info("Logging in to SMTP server")
+            smtp_obj.login(email_sender, email_password)
+            logging.info("Sending email")
+            smtp_obj.send_message(message)
+            smtp_obj.quit()
+            logging.info("Notification email sent successfully.")
+        except Exception as e:
+            logging.error(f"Failed to send notification email: {e}")
+
+    try:
+        # Validate the admin email format
+        validate_email(email_sender)
+        logging.info(f"Admin email {email_sender} is valid")
+        await asyncio.to_thread(send_email)
+    except EmailNotValidError as e:
+        logging.error(f"Invalid email address: {e}")
         
 # End Of Send Email Verification
 

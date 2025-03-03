@@ -20,13 +20,15 @@ import uvicorn
 from . import crud, models, schemas, database, config
 from .database import async_session
 
+import boto3
+from botocore.client import Config
+
+
 app = FastAPI()
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-
-app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 CORS_ALLOW_HEADERS = ["Content-Type", "Authorization", "X-Total-Count"]
 CORS_EXPOSE_HEADERS = ["X-Total-Count", "Content-Range"]
@@ -43,12 +45,28 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
 load_dotenv(override=True)
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
 stripe.api_key = os.getenv("STRIPE_API_KEY")
 endpoint_secret = os.getenv("STRIPE_ENDPOINT_SECRET")
 YOUR_DOMAIN = os.getenv("YOUR_DOMAIN")
+
+
+# app.mount("/static", StaticFiles(directory="app/static"), name="static")
+
+DO_SPACES_REGION = os.getenv("DO_SPACES_REGION", "nyc3")
+DO_SPACES_ENDPOINT = os.getenv("DO_SPACES_ENDPOINT", f"https://{DO_SPACES_REGION}.digitaloceanspaces.com")
+DO_SPACES_KEY = os.getenv("DO_SPACES_KEY")
+DO_SPACES_SECRET = os.getenv("DO_SPACES_SECRET")
+DO_SPACES_BUCKET = os.getenv("DO_SPACES_BUCKET", "your-bucket-name")
+
+s3 = boto3.client(
+    "s3",
+    region_name=DO_SPACES_REGION,
+    endpoint_url=DO_SPACES_ENDPOINT,
+    aws_access_key_id=DO_SPACES_KEY,
+    aws_secret_access_key=DO_SPACES_SECRET,
+    config=Config(signature_version="s3v4")
+)
+
 
 async def init_models():
     async with database.engine.begin() as conn:
@@ -325,13 +343,23 @@ async def create_destination(
     
     if image:
         filename = f"{uuid.uuid4()}{Path(image.filename).suffix}"
-        file_path = config.IMAGEDIR / filename
+        try:
+            # Upload the file to DigitalOcean Spaces
+            s3.upload_fileobj(
+                image.file,                # The file object from the request
+                DO_SPACES_BUCKET,          # e.g., "top-travel-object-spaces"
+                filename,
+                ExtraArgs={
+                    "ACL": "public-read",   # Make it publicly accessible
+                    "ContentType": image.content_type
+                }
+            )
+        except Exception as e:
+            logger.error(f"Error uploading file to Spaces: {e}")
+            raise HTTPException(status_code=500, detail="Error uploading file to Spaces")
 
-        with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(image.file, buffer)
-        
+        src = f"{DO_SPACES_ENDPOINT}/{DO_SPACES_BUCKET}/{filename}"
         title = DestinationName
-        src = f"/static/images/{filename}"
     else:
         title = None
         src = None
@@ -488,7 +516,19 @@ async def delete_package(package_id: int, db: AsyncSession = Depends(database.ge
 
 @app.post("/bookings/", response_model=schemas.BookingInDB)
 async def create_booking(booking: schemas.BookingCreate, db: AsyncSession = Depends(database.get_db)):
-    return await crud.create_booking(db, booking)
+    # Create the booking in the database
+    new_booking = await crud.create_booking(db, booking)
+    if new_booking is None:
+        raise HTTPException(status_code=400, detail="Failed to create booking")
+
+    # Send a notification email to yourself if booking is successful
+    try:
+        await crud.send_booking_notification(email_password="David@2024!")  
+        logging.info("Booking notification sent.")
+    except Exception as e:
+        logging.error(f"Failed to send booking notification: {e}")
+
+    return new_booking
 
 @app.get("/bookings/", response_model=List[schemas.BookingInDB])
 async def read_bookings(response: Response, skip: int = 0, limit: int = 10, db: AsyncSession = Depends(database.get_db)):
