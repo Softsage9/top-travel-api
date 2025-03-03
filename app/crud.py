@@ -715,19 +715,14 @@ async def create_package(db: AsyncSession, package: schemas.PackageCreate) -> sc
         # Create a new price in Stripe
         stripe_price = stripe.Price.create(
             product=stripe_product.id,
-            unit_amount=int(package.Price * 100),  # Stripe expects amount in the smallest currency unit
-            currency="gbp",  # Ensure the currency matches your requirements
+            unit_amount=int(package.Price * 100),  # Stripe expects the amount in the smallest currency unit
+            currency="gbp",
         )
 
-        # Convert back to the main currency unit (GBP in this case)
-        price_amount = stripe_price.unit_amount / 100  # Convert from pence to GBP
+        # Convert back to GBP
+        price_amount = stripe_price.unit_amount / 100
         
-        print("Package data:", package.dict())
-        print("Stripe Product ID:", stripe_product.id)
-        print("Stripe Price ID:", stripe_price.id)
-
-
-        # Create the package instance with Stripe IDs and correct price
+        # Create the package instance with the correct price and Stripe IDs
         db_package = models.Package(
             **package.dict(exclude={'Price', 'StripeProductID', 'StripePriceID'}),
             Price=price_amount,
@@ -749,15 +744,14 @@ async def create_package(db: AsyncSession, package: schemas.PackageCreate) -> sc
         country = None
 
         if destination:
-            file_name = destination.src.split('\\')[-1] if destination.src else 'default.png'
+            # Since we use Spaces for all images, destination.src should already be the full Spaces URL.
             image_info = {
                 "rawFile": destination.rawFile,
-                "src": f"https://server-app-zxcxm.ondigitalocean.app/static/images/{file_name}",
+                "src": destination.src,  # e.g. "https://top-travel-object-spaces.lon1.digitaloceanspaces.com/filename.jpg"
                 "title": destination.title,
             }
             country = destination.Country
 
-        # Return the package with the necessary additional information
         return schemas.PackageInDB(
             PackageID=db_package.PackageID,
             PackageName=db_package.PackageName,
@@ -775,6 +769,7 @@ async def create_package(db: AsyncSession, package: schemas.PackageCreate) -> sc
 
     except stripe.error.StripeError as e:
         raise HTTPException(status_code=400, detail=f"Stripe error: {str(e)}")
+
 
 async def get_package(db: AsyncSession, package_id: int) -> schemas.PackageInDB:
     # Fetch package by package_id
