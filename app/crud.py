@@ -840,20 +840,13 @@ async def get_packages(db: AsyncSession, skip: int = 0, limit: int = 10) -> List
         country = None
 
         if destination:
-            if "/static/images/" in destination.src:
-                file_name = destination.src 
-            else:
-                file_name = f"/static/images/{destination.src.split('\\')[-1]}" 
-            
+            # Use the full Spaces URL directly
             image_info = {
                 "rawFile": destination.rawFile,
-                "src": f"https://server-app-zxcxm.ondigitalocean.app{file_name}", 
+                "src": destination.src,  # Expected to be a complete URL e.g. https://top-travel-object-spaces.lon1.digitaloceanspaces.com/filename.jpg
                 "title": destination.title,
             }
             country = destination.Country
-        else:
-            image_info = None
-            country = None
 
         results.append(schemas.PackageInDB(
             PackageID=package.PackageID,
@@ -871,6 +864,7 @@ async def get_packages(db: AsyncSession, skip: int = 0, limit: int = 10) -> List
         ))
 
     return results, total
+
 
 async def get_packages_by_destination_id(db: AsyncSession, destination_id: int) -> List[schemas.PackageInDB]:
     stmt = select(models.Package).filter(models.Package.DestinationID == destination_id)
