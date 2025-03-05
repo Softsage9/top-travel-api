@@ -798,7 +798,7 @@ async def get_package(db: AsyncSession, package_id: int) -> schemas.PackageInDB:
 
         image_info = schemas.ImageBase(
             rawFile=destination.rawFile,
-            src=f"https://server-app-zxcxm.ondigitalocean.app{file_name}",  # Correctly handle the URL construction
+            src=destination.src,  # Correctly handle the URL construction
             title=destination.title,
         )
         country = destination.Country
@@ -880,20 +880,14 @@ async def get_packages_by_destination_id(db: AsyncSession, destination_id: int) 
 
         image_info = None
         country = None
-
-        if destination:
-            # Check if destination.src already includes '/static/images/'
-            if "/static/images/" in destination.src:
-                file_name = destination.src  # Use the full path directly if it's already included
-            else:
-                file_name = f"/static/images/{destination.src.split('\\')[-1]}"  # Extract just the filename
             
-            image_info = schemas.ImageBase(
-                rawFile=destination.rawFile,
-                src=f"https://server-app-zxcxm.ondigitalocean.app{file_name}",  # Prepend the base URL properly
-                title=destination.title,
+        image_info = schemas.ImageBase(
+            rawFile=destination.rawFile,
+            src=destination.src,  # Prepend the base URL properly
+            title=destination.title,
             )
-            country = destination.Country
+        
+        country = destination.Country
             
         results.append(schemas.PackageInDB(
             PackageID=package.PackageID,
@@ -962,7 +956,7 @@ async def update_package(db: AsyncSession, package_id: int, package_update: sche
 
             image_info = schemas.ImageBase(
                 rawFile=destination.rawFile,
-                src=f"https://server-app-zxcxm.ondigitalocean.app{file_name}",  # Construct the full URL
+                src=destination.src,  # Construct the full URL
                 title=destination.title,
             )
             country = destination.Country
